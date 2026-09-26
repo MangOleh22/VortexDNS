@@ -91,4 +91,4 @@ Butuh Go >= 1.21.
 
 ## Lisensi
 
-Lihat repositori untuk detail lisensi.
+Dirilis di bawah [Lisensi MIT](LICENSE.md).
