@@ -1,0 +1,166 @@
+openapi: 3.0.3
+info:
+  title: VortexDNS Dashboard API
+  description: >
+    REST API untuk dashboard VortexDNS. Sebagian besar endpoint memerlukan
+    sesi terautentikasi (cookie `vortex_session`) yang didapat dari
+    `/api/auth/login`. Endpoint di bawah `/api/auth/*` dan `/metrics` bersifat
+    publik.
+  version: 1.0.0
+servers:
+  - url: /
+security:
+  - cookieAuth: []
+paths:
+  /api/auth/status:
+    get:
+      summary: Status autentikasi & apakah butuh setup awal
+      security: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  needs_setup: { type: boolean }
+                  is_logged_in: { type: boolean }
+  /api/auth/setup:
+    post:
+      summary: Buat akun admin pertama (hanya bila belum ada admin)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password]
+              properties:
+                username: { type: string, minLength: 3 }
+                password: { type: string, minLength: 6 }
+      responses:
+        '200': { description: Berhasil }
+        '400': { description: Payload tidak valid }
+        '403': { description: Admin sudah dikonfigurasi }
+  /api/auth/login:
+    post:
+      summary: Login, mengeset cookie sesi
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password]
+              properties:
+                username: { type: string }
+                password: { type: string }
+      responses:
+        '200': { description: Berhasil, set-cookie vortex_session }
+        '401': { description: Kredensial salah }
+  /api/auth/logout:
+    post:
+      summary: Logout, menghapus sesi
+      responses:
+        '200': { description: Berhasil }
+  /api/stats:
+    get:
+      summary: Statistik ringkas termasuk breakdown rcode
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Stats'
+  /api/stats/reset:
+    post:
+      summary: Reset semua penghitung statistik & riwayat long-term
+      responses:
+        '200': { description: Berhasil }
+        '405': { description: Method tidak diizinkan }
+  /api/stats/detailed:
+    get:
+      summary: Statistik detail
+      responses:
+        '200': { description: OK }
+  /api/logs:
+    get:
+      summary: Query log dari ring buffer
+      responses:
+        '200': { description: OK }
+  /api/logs/stream:
+    get:
+      summary: Stream query realtime (Server-Sent Events)
+      responses:
+        '200':
+          description: Stream text/event-stream
+          content:
+            text/event-stream: {}
+  /api/rules:
+    get: { summary: Daftar rule blokir, responses: { '200': { description: OK } } }
+  /api/rules/add:
+    post: { summary: Tambah rule, responses: { '200': { description: OK } } }
+  /api/rules/remove:
+    post: { summary: Hapus rule, responses: { '200': { description: OK } } }
+  /api/cache/flush:
+    post: { summary: Kosongkan cache DNS, responses: { '200': { description: OK } } }
+  /api/service/restart:
+    post: { summary: Restart layanan VortexDNS, responses: { '200': { description: OK } } }
+  /api/clients:
+    get: { summary: Daftar klien aktif, responses: { '200': { description: OK } } }
+  /api/upstream:
+    get: { summary: Status upstream resolver, responses: { '200': { description: OK } } }
+  /api/blocklists:
+    get: { summary: Daftar blocklist, responses: { '200': { description: OK } } }
+  /api/topdomains:
+    get: { summary: Domain teratas, responses: { '200': { description: OK } } }
+  /api/zones/records:
+    get: { summary: Zone records, responses: { '200': { description: OK } } }
+  /api/dns/test:
+    get:
+      summary: Uji resolusi domain
+      parameters:
+        - name: domain
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: OK }
+  /api/advanced/config:
+    get: { summary: Ambil konfigurasi lengkap, responses: { '200': { description: OK } } }
+    post: { summary: Simpan konfigurasi, responses: { '200': { description: OK } } }
+  /metrics:
+    get:
+      summary: Metrik Prometheus (publik)
+      security: []
+      responses:
+        '200':
+          description: OK
+          content:
+            text/plain: {}
+components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: vortex_session
+  schemas:
+    Stats:
+      type: object
+      properties:
+        total_queries: { type: integer }
+        blocked_queries: { type: integer }
+        cached_queries: { type: integer }
+        noerror_queries: { type: integer }
+        nxdomain_queries: { type: integer }
+        refused_queries: { type: integer }
+        servfail_queries: { type: integer }
+        block_percentage: { type: number }
+        avg_latency: { type: integer }
+        p95_latency: { type: integer }
+        active_clients: { type: integer }
+        dnssec_rate: { type: string }

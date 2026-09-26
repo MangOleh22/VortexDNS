@@ -1,0 +1,14 @@
+# Runtime artifacts
+*.log
+vortex_db/access.log*
+
+# Compiled binary
+vortexdns
+vortexdns_test
+
+# Config backup
+config.json.bak
+config.json
+
+# Runtime data
+vortex_db/
