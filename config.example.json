@@ -6,7 +6,7 @@
     "9.9.9.9:53"
   ],
   "blocklist_urls": [
-    "https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts"
+    "vortex_db/lists/82bbcf0fb464ac35c8f796c63097bbbb.txt"
   ],
   "custom_blacklist": [],
   "custom_whitelist": [],

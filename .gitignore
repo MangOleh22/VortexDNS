@@ -10,4 +10,5 @@ config.json.bak
 vortex_db/access.log*
 vortex_db/lists/*
 !vortex_db/lists/.gitkeep
+!vortex_db/lists/82bbcf0fb464ac35c8f796c63097bbbb.txt
 *.log
