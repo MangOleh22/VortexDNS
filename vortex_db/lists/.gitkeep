@@ -1,0 +1,2 @@
+# Direktori data runtime. Isi (access.log, blocklist ter-download) di-generate
+# saat runtime dan tidak di-commit.
