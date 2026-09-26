@@ -30,6 +30,11 @@ func TestAccessLogRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	ae := &AdvancedEngine{cfg: &config.Config{}}
 	ae.openAccessLog(filepath.Join(dir, "access.log"))
+	defer func() {
+		if ae.accessLog != nil {
+			ae.accessLog.Close()
+		}
+	}()
 
 	ae.WriteAccessLog("first.com", "A", "10.0.0.1", "Allowed", 5)
 	ae.WriteAccessLog("second.com", "A", "10.0.0.2", "Blocked", 0)
@@ -53,6 +58,11 @@ func TestAccessLogRotation(t *testing.T) {
 	path := filepath.Join(dir, "access.log")
 	ae := &AdvancedEngine{cfg: &config.Config{}}
 	ae.openAccessLog(path)
+	defer func() {
+		if ae.accessLog != nil {
+			ae.accessLog.Close()
+		}
+	}()
 
 	// Push the counter past the threshold so the next write triggers rotation.
 	ae.accessMu.Lock()

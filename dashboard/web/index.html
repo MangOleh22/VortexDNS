@@ -170,6 +170,9 @@
     <div class="nav-item" data-page="cache"><span class="nav-icon">▦</span>Cache</div>
     <div class="nav-item" data-page="dnssec"><span class="nav-icon">⚿</span>DNSSEC</div>
 
+    <div class="nav-section">Intelligence</div>
+    <div class="nav-item" data-page="webintel"><span class="nav-icon">🌐</span>Website Intelligence</div>
+
     <div class="nav-section">Network</div>
     <div class="nav-item" data-page="clients"><span class="nav-icon">◷</span>Clients</div>
     <div class="nav-item" data-page="acl"><span class="nav-icon">🔒</span>ACL</div>
@@ -797,6 +800,318 @@
           <button type="button" class="btn btn-danger" onclick="restartDNS()">↺ Restart VortexDNS</button>
         </div>
       </form>
+    </div>
+
+    <!-- ══════════ WEBSITE INTELLIGENCE (OBJECTIVE 14) ══════════ -->
+    <div id="page-webintel" class="page hidden">
+      <div class="page-head">
+        <div class="page-title">🌐 Website Intelligence & URL Scanner</div>
+        <div class="page-sub">real-time surface telemetry · TLS · HTTP/3 · Lighthouse · Tech Stack · AI-Native & SSRF-safe scanning</div>
+      </div>
+
+      <!-- Intelligence Sub-navigation -->
+      <div class="tabs mb16" id="wi-top-tabs">
+        <div class="tab-item active" onclick="switchWiView('scan', this)">⚡ Scanner</div>
+        <div class="tab-item" onclick="switchWiView('history', this)">📋 Scan History (<span id="wi-hist-count">0</span>)</div>
+        <div class="tab-item" onclick="switchWiView('compare', this)">⚖ Compare Scans</div>
+        <div class="tab-item" onclick="switchWiView('engine', this)">⚙ Scanner Status</div>
+      </div>
+
+      <!-- ── VIEW 1: SCANNER & LIVE FINDINGS ────────────────── -->
+      <div id="wi-view-scan" class="wi-view">
+        <!-- URL Input Card -->
+        <div class="card mb16">
+          <div class="card-title">🔍 Target Website Input</div>
+          <div style="font-size:12px;color:var(--text2);margin-bottom:12px;">
+            Safe, non-destructive, rate-limited public surface analysis. Protected by strict SSRF validation isolating private networks and cloud metadata.
+          </div>
+
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+            <input type="url" class="inp" id="wi-input-url" placeholder="https://example.com" style="flex:1;min-width:280px;font-size:14px;padding:10px 14px;" autofocus/>
+            <button type="button" class="btn btn-primary" id="wi-btn-start" onclick="startWebScan()" style="padding:10px 20px;font-size:13px;font-weight:600;">⚡ Start Scan</button>
+            <button type="button" class="btn btn-danger hidden" id="wi-btn-cancel" onclick="cancelWebScan()" style="padding:10px 16px;">✕ Cancel</button>
+            <button type="button" class="btn" onclick="toggleWiAdvanced()" style="padding:10px 14px;">⚙ Options</button>
+          </div>
+
+          <!-- Advanced Options (Collapsible) -->
+          <div id="wi-advanced-opts" class="hidden" style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border);display:grid;grid-template-columns:repeat(auto-fit, minmax(160px, 1fr));gap:12px;">
+            <div>
+              <label class="form-label" for="wi-opt-pages">Max Pages</label>
+              <input type="number" class="inp" id="wi-opt-pages" value="50" min="1" max="200"/>
+            </div>
+            <div>
+              <label class="form-label" for="wi-opt-depth">Max Depth</label>
+              <input type="number" class="inp" id="wi-opt-depth" value="3" min="1" max="5"/>
+            </div>
+            <div>
+              <label class="form-label" for="wi-opt-concurrency">Concurrency</label>
+              <input type="number" class="inp" id="wi-opt-concurrency" value="5" min="1" max="10"/>
+            </div>
+            <div>
+              <label class="form-label" for="wi-opt-timeout">Timeout (s)</label>
+              <input type="number" class="inp" id="wi-opt-timeout" value="15" min="5" max="60"/>
+            </div>
+          </div>
+        </div>
+
+        <!-- Live Scan Progress & Telemetry Box -->
+        <div id="wi-live-box" class="card mb16 hidden">
+          <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:12px;">
+            <div style="display:flex;align-items:center;gap:10px;">
+              <span class="live-dot" id="wi-live-dot"></span>
+              <strong><span id="wi-live-target">https://example.com</span></strong>
+              <span class="pill cyan" id="wi-live-status-pill">RUNNING</span>
+            </div>
+            <div style="font-size:12px;color:var(--text2);">
+              Scan ID: <code id="wi-live-id" style="color:var(--cyan);">—</code> | Elapsed: <span id="wi-live-elapsed" style="color:var(--text);">0s</span>
+            </div>
+          </div>
+
+          <!-- Progress Bar -->
+          <div style="background:var(--bg-base);border-radius:6px;height:10px;overflow:hidden;border:1px solid var(--border);margin-bottom:8px;">
+            <div id="wi-live-bar" style="width:0%;height:100%;background:var(--grad-main);transition:width .3s ease;"></div>
+          </div>
+          <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text2);margin-bottom:16px;">
+            <span>Stage: <strong id="wi-live-stage" style="color:var(--text);">Initializing...</strong></span>
+            <span id="wi-live-pct">0%</span>
+          </div>
+
+          <!-- Realtime Metrics Grid -->
+          <div class="g g6 mb12" style="margin-bottom:12px;">
+            <div class="stat-card" style="padding:10px;">
+              <div class="sc-label" style="font-size:10px;">Pages Inspected</div>
+              <div class="sc-value" style="font-size:18px;" id="wi-m-pages">0 / 0</div>
+            </div>
+            <div class="stat-card" style="padding:10px;">
+              <div class="sc-label" style="font-size:10px;">Requests Total</div>
+              <div class="sc-value" style="font-size:18px;" id="wi-m-reqs">0</div>
+            </div>
+            <div class="stat-card" style="padding:10px;">
+              <div class="sc-label" style="font-size:10px;">Data Transferred</div>
+              <div class="sc-value" style="font-size:18px;" id="wi-m-bytes">0 KB</div>
+            </div>
+            <div class="stat-card" style="padding:10px;">
+              <div class="sc-label" style="font-size:10px;">TLS Score</div>
+              <div class="sc-value" style="font-size:18px;color:var(--green);" id="wi-m-tls">—</div>
+            </div>
+            <div class="stat-card" style="padding:10px;">
+              <div class="sc-label" style="font-size:10px;">AI Native Status</div>
+              <div class="sc-value" style="font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" id="wi-m-ai">—</div>
+            </div>
+            <div class="stat-card" style="padding:10px;">
+              <div class="sc-label" style="font-size:10px;">Findings Count</div>
+              <div class="sc-value" style="font-size:18px;color:var(--yellow);" id="wi-m-findings">0</div>
+            </div>
+          </div>
+
+          <!-- Risk Severity Counters & Export Buttons -->
+          <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;padding-top:12px;border-top:1px solid var(--border);">
+            <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:12px;">
+              <span style="color:var(--text2);margin-right:4px;">Risks:</span>
+              <span class="pill red" id="wi-pill-crit" title="Critical Findings">0 Critical</span>
+              <span class="pill" style="background:rgba(255,152,0,.15);color:var(--orange);" id="wi-pill-high" title="High Findings">0 High</span>
+              <span class="pill" style="background:rgba(155,92,255,.15);color:var(--purple);" id="wi-pill-med" title="Medium Findings">0 Medium</span>
+              <span class="pill" style="background:rgba(0,230,118,.15);color:var(--green);" id="wi-pill-low" title="Low Findings">0 Low</span>
+              <span class="pill gray" id="wi-pill-info" title="Informational">0 Info</span>
+            </div>
+
+            <!-- Export Buttons -->
+            <div style="display:flex;gap:6px;flex-wrap:wrap;" id="wi-export-toolbar">
+              <button type="button" class="btn" onclick="exportScan('json')" style="font-size:11px;padding:4px 10px;">⬇ JSON</button>
+              <button type="button" class="btn" onclick="exportScan('jsonl')" style="font-size:11px;padding:4px 10px;">⬇ JSONL</button>
+              <button type="button" class="btn" onclick="exportScan('csv')" style="font-size:11px;padding:4px 10px;">⬇ CSV</button>
+              <button type="button" class="btn btn-primary" onclick="exportScan('pdf')" style="font-size:11px;padding:4px 10px;">📄 PDF Report</button>
+              <button type="button" class="btn" onclick="viewHtmlReport()" style="font-size:11px;padding:4px 10px;">🌐 HTML Report</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Scan Detail Section (Live Tabs) -->
+        <div id="wi-detail-box" class="card hidden">
+          <!-- 13 Live Tabs per specification -->
+          <div class="tabs mb16" id="wi-detail-tabs" style="overflow-x:auto;white-space:nowrap;padding-bottom:4px;">
+            <div class="tab-item active" onclick="switchWiDetailTab('overview', this)">Overview</div>
+            <div class="tab-item" onclick="switchWiDetailTab('lighthouse', this)">Lighthouse</div>
+            <div class="tab-item" onclick="switchWiDetailTab('tls', this)">TLS</div>
+            <div class="tab-item" onclick="switchWiDetailTab('security', this)">Security</div>
+            <div class="tab-item" onclick="switchWiDetailTab('tech', this)">Tech Stack</div>
+            <div class="tab-item" onclick="switchWiDetailTab('ai', this)">AI Native</div>
+            <div class="tab-item" onclick="switchWiDetailTab('routes', this)">Routes</div>
+            <div class="tab-item" onclick="switchWiDetailTab('network', this)">Network</div>
+            <div class="tab-item" onclick="switchWiDetailTab('perf', this)">Performance</div>
+            <div class="tab-item" onclick="switchWiDetailTab('pwa', this)">PWA</div>
+            <div class="tab-item" onclick="switchWiDetailTab('findings', this)">Findings</div>
+            <div class="tab-item" onclick="switchWiDetailTab('mitigation', this)">Mitigation</div>
+            <div class="tab-item" onclick="switchWiDetailTab('raw', this)">Raw Data</div>
+          </div>
+
+          <!-- Tab 1: Overview -->
+          <div id="wi-pane-overview" class="wi-pane">
+            <div class="g g3 mb16" id="wi-overview-cards"></div>
+            <div class="card mb12" style="background:var(--bg-base);">
+              <div class="card-title">Executive Summary</div>
+              <p id="wi-ov-summary-text" style="color:var(--text2);font-size:13px;line-height:1.6;">Awaiting scan completion...</p>
+            </div>
+          </div>
+
+          <!-- Tab 2: Lighthouse -->
+          <div id="wi-pane-lighthouse" class="wi-pane hidden">
+            <div id="wi-lh-container"></div>
+          </div>
+
+          <!-- Tab 3: TLS -->
+          <div id="wi-pane-tls" class="wi-pane hidden">
+            <div id="wi-tls-container"></div>
+          </div>
+
+          <!-- Tab 4: Security -->
+          <div id="wi-pane-security" class="wi-pane hidden">
+            <div id="wi-security-container"></div>
+          </div>
+
+          <!-- Tab 5: Tech Stack -->
+          <div id="wi-pane-tech" class="wi-pane hidden">
+            <div id="wi-tech-container"></div>
+          </div>
+
+          <!-- Tab 6: AI Native -->
+          <div id="wi-pane-ai" class="wi-pane hidden">
+            <div id="wi-ai-container"></div>
+          </div>
+
+          <!-- Tab 7: Routes -->
+          <div id="wi-pane-routes" class="wi-pane hidden">
+            <div id="wi-routes-container"></div>
+          </div>
+
+          <!-- Tab 8: Network -->
+          <div id="wi-pane-network" class="wi-pane hidden">
+            <div id="wi-network-container"></div>
+          </div>
+
+          <!-- Tab 9: Performance -->
+          <div id="wi-pane-perf" class="wi-pane hidden">
+            <div id="wi-perf-container"></div>
+          </div>
+
+          <!-- Tab 10: PWA -->
+          <div id="wi-pane-pwa" class="wi-pane hidden">
+            <div id="wi-pwa-container"></div>
+          </div>
+
+          <!-- Tab 11: Findings -->
+          <div id="wi-pane-findings" class="wi-pane hidden">
+            <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;">
+              <span style="font-size:12px;color:var(--text2);">Filter Severity:</span>
+              <select class="inp" id="wi-findings-filter" onchange="filterFindingsTable(this.value)" style="width:auto;padding:4px 8px;font-size:12px;">
+                <option value="all">All Severities</option>
+                <option value="critical">Critical</option>
+                <option value="high">High</option>
+                <option value="medium">Medium</option>
+                <option value="low">Low</option>
+                <option value="informational">Informational</option>
+              </select>
+            </div>
+            <div id="wi-findings-container"></div>
+          </div>
+
+          <!-- Tab 12: Mitigation -->
+          <div id="wi-pane-mitigation" class="wi-pane hidden">
+            <div id="wi-mitigation-container"></div>
+          </div>
+
+          <!-- Tab 13: Raw Data -->
+          <div id="wi-pane-raw" class="wi-pane hidden">
+            <pre id="wi-raw-json" style="max-height:500px;overflow:auto;background:var(--bg-base);padding:12px;border-radius:6px;border:1px solid var(--border);font-size:11px;color:var(--cyan);"></pre>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── VIEW 2: SCAN HISTORY ──────────────────────────── -->
+      <div id="wi-view-history" class="wi-view hidden">
+        <div class="card">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px;">
+            <div class="card-title" style="margin:0;">Historical Website Intelligence Scans</div>
+            <button type="button" class="btn btn-sm" onclick="loadScanHistory()">↻ Refresh</button>
+          </div>
+          <div class="table-wrap">
+            <table class="data-table" id="wi-history-table">
+              <thead>
+                <tr>
+                  <th>Target Host</th>
+                  <th>Scan ID</th>
+                  <th>Started At</th>
+                  <th>Duration</th>
+                  <th>TLS</th>
+                  <th>AI Detection</th>
+                  <th>Risks (C / H / M)</th>
+                  <th>Status</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="wi-history-tbody">
+                <tr><td colspan="9" style="text-align:center;color:var(--text3);">Belum ada riwayat scan website.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── VIEW 3: COMPARE SCANS ─────────────────────────── -->
+      <div id="wi-view-compare" class="wi-view hidden">
+        <div class="card mb16">
+          <div class="card-title">⚖ Compare Scans of Target Domain</div>
+          <div style="font-size:12px;color:var(--text2);margin-bottom:12px;">
+            Track regressions, resolved vulnerabilities, technology stack migrations, and AI capability additions over time.
+          </div>
+          <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;">
+            <div style="flex:1;min-width:200px;">
+              <label class="form-label" for="wi-cmp-base">Base Scan (Older)</label>
+              <select class="inp" id="wi-cmp-base"></select>
+            </div>
+            <div style="flex:1;min-width:200px;">
+              <label class="form-label" for="wi-cmp-target">Target Scan (Newer)</label>
+              <select class="inp" id="wi-cmp-target"></select>
+            </div>
+            <div style="padding-top:16px;">
+              <button type="button" class="btn btn-primary" onclick="runScanCompare()">Compare Scans →</button>
+            </div>
+          </div>
+        </div>
+
+        <div id="wi-compare-results" class="hidden">
+          <div class="card mb16" id="wi-cmp-summary-card"></div>
+          <div class="grid-2" style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+            <div class="card" id="wi-cmp-new-findings"></div>
+            <div class="card" id="wi-cmp-res-findings"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── VIEW 4: SCANNER ENGINE STATUS ─────────────────── -->
+      <div id="wi-view-engine" class="wi-view hidden">
+        <div class="card">
+          <div class="card-title">⚙ Scanner & Reporting Engine Health</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:12px;">
+            <div class="stat-card" style="padding:16px;">
+              <div class="sc-label">PDF Reporting Engine</div>
+              <div class="sc-value" id="wi-engine-pdf-status" style="font-size:18px;">Checking...</div>
+              <div class="sc-sub" id="wi-engine-pdf-detail">—</div>
+            </div>
+            <div class="stat-card" style="padding:16px;">
+              <div class="sc-label">Lighthouse Measurements</div>
+              <div class="sc-value" id="wi-engine-lh-status" style="font-size:18px;">Checking...</div>
+              <div class="sc-sub" id="wi-engine-lh-detail">—</div>
+            </div>
+          </div>
+          <div class="card" style="background:var(--bg-base);margin-top:16px;">
+            <strong>Engine Reliability Policy:</strong>
+            <p style="font-size:12px;color:var(--text2);margin-top:4px;">
+              VortexDNS is engineered to never crash or fail startup if an external CLI is missing. When headless Chromium is present, high-fidelity browser PDF generation and Lighthouse audits execute automatically. When absent, the engine falls back to standalone printable HTML reports and explicit 'status: unavailable' tags without fabricating synthetic benchmarks.
+            </p>
+          </div>
+        </div>
+      </div>
     </div>
 
   </main>

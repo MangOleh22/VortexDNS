@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"sort"
 	"strings"
@@ -29,6 +30,7 @@ import (
 	"vortexdns/config"
 	"vortexdns/dns"
 	"vortexdns/forwarder"
+	"vortexdns/scanner"
 )
 
 //go:embed web/*
@@ -36,13 +38,14 @@ var webFiles embed.FS
 
 // DashboardServer coordinates the HTTP API and dynamic UI delivery
 type DashboardServer struct {
-	cfg       *config.Config
-	server    *dns.DNSServer
-	blocker   *blocker.Blocker
-	updater   *blocker.BlockerUpdater
-	cache     *cache.DNSCache
-	forwarder *forwarder.SmartForwarder
-	mux       *http.ServeMux
+	cfg        *config.Config
+	server     *dns.DNSServer
+	blocker    *blocker.Blocker
+	updater    *blocker.BlockerUpdater
+	cache      *cache.DNSCache
+	forwarder  *forwarder.SmartForwarder
+	scannerMgr *scanner.ScanManager
+	mux        *http.ServeMux
 
 	// Sessions
 	sessionTokens map[string]time.Time
@@ -103,6 +106,7 @@ func New(cfg *config.Config, s *dns.DNSServer, b *blocker.Blocker, u *blocker.Bl
 		updater:       u,
 		cache:         c,
 		forwarder:     f,
+		scannerMgr:    scanner.NewManager(cfg.DatabaseDir, 2),
 		mux:           http.NewServeMux(),
 		sessionTokens: make(map[string]time.Time),
 		startTime:     time.Now(),
@@ -254,6 +258,12 @@ func (ds *DashboardServer) registerRoutes() {
 	ds.mux.HandleFunc("/api/advanced/rdns", api(ds.handleAdvancedRDNS))
 	ds.mux.HandleFunc("/api/advanced/logs/export", api(ds.handleAdvancedLogsExport))
 	ds.mux.HandleFunc("/api/advanced/stats/longterm", api(ds.handleAdvancedStatsLongterm))
+
+	// Web Intelligence & URL Scanner APIs (Objective 14)
+	ds.mux.HandleFunc("/api/v1/scans", api(ds.handleScans))
+	ds.mux.HandleFunc("/api/v1/scans/compare", api(ds.handleScansCompare))
+	ds.mux.HandleFunc("/api/v1/scans/engine-status", api(ds.handleScansEngineStatus))
+	ds.mux.HandleFunc("/api/v1/scans/", api(ds.handleScanDetail))
 
 	// Public Prometheus metrics
 	ds.mux.HandleFunc("/metrics", ds.handlePrometheusMetrics)
@@ -1017,6 +1027,8 @@ func (ds *DashboardServer) handlePrometheusMetrics(w http.ResponseWriter, r *htt
 	_, _ = fmt.Fprintf(w, "# HELP vortexdns_parental_blocked Total parental content queries blocked\n")
 	_, _ = fmt.Fprintf(w, "# TYPE vortexdns_parental_blocked counter\n")
 	_, _ = fmt.Fprintf(w, "vortexdns_parental_blocked %d\n\n", adv.ParentalBlocked)
+
+	_, _ = fmt.Fprint(w, scanner.PrometheusMetricsOutput())
 }
 
 // isValidDomain checks if a string is a plausible domain name.
@@ -1987,5 +1999,251 @@ func (ds *DashboardServer) handleConditional(w http.ResponseWriter, r *http.Requ
 
 	default:
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+	}
+}
+
+// ── Web Intelligence & URL Scanner Handlers (Objective 14) ──────────────────
+
+type scanCreateRequest struct {
+	URL    string              `json:"url"`
+	Config *scanner.ScanConfig `json:"config,omitempty"`
+}
+
+func (ds *DashboardServer) handleScans(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodPost:
+		var req scanCreateRequest
+		if err := readJSON(r, &req); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid payload"})
+			return
+		}
+		req.URL = strings.TrimSpace(req.URL)
+		if req.URL == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "URL cannot be empty"})
+			return
+		}
+
+		scan, err := ds.scannerMgr.CreateScan(req.URL, req.Config)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+
+		ds.recordAudit(r, "scan", fmt.Sprintf("Initiated website scan: %s (id: %s)", scan.TargetHost, scan.ID), true)
+		writeJSON(w, http.StatusCreated, scan)
+
+	case http.MethodGet:
+		limit := parsePositiveInt(r.URL.Query().Get("limit"), 20)
+		offset := parsePositiveInt(r.URL.Query().Get("offset"), 0)
+		scans, total := ds.scannerMgr.ListScans(limit, offset)
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"scans":  scans,
+			"total":  total,
+			"limit":  limit,
+			"offset": offset,
+		})
+
+	default:
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+	}
+}
+
+func (ds *DashboardServer) handleScansCompare(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+
+	baseID := strings.TrimSpace(r.URL.Query().Get("base"))
+	targetID := strings.TrimSpace(r.URL.Query().Get("target"))
+	if baseID == "" || targetID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "both 'base' and 'target' query parameters are required"})
+		return
+	}
+
+	diff, err := ds.scannerMgr.CompareScans(baseID, targetID)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, diff)
+}
+
+func (ds *DashboardServer) handleScansEngineStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"pdf":        scanner.CheckPDFEngine(),
+		"lighthouse": scanner.IsLighthouseAvailable(),
+	})
+}
+
+func (ds *DashboardServer) handleScanDetail(w http.ResponseWriter, r *http.Request) {
+	// Path format: /api/v1/scans/{scan_id} or /api/v1/scans/{scan_id}/...
+	subPath := strings.TrimPrefix(r.URL.Path, "/api/v1/scans/")
+	parts := strings.Split(strings.Trim(subPath, "/"), "/")
+	if len(parts) == 0 || parts[0] == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing scan id"})
+		return
+	}
+
+	scanID := parts[0]
+
+	// Handle scan deletion or cancellation
+	if r.Method == http.MethodDelete {
+		ok := ds.scannerMgr.DeleteScan(scanID)
+		if !ok {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "scan not found"})
+			return
+		}
+		ds.recordAudit(r, "scan", "Deleted/cancelled scan: "+scanID, true)
+		writeJSON(w, http.StatusOK, map[string]string{"status": "success", "scan_id": scanID})
+		return
+	}
+
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+
+	scan, found := ds.scannerMgr.GetScan(scanID)
+	if !found {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "scan not found"})
+		return
+	}
+
+	// Route based on subpath
+	if len(parts) == 1 {
+		// GET /api/v1/scans/{scan_id}
+		writeJSON(w, http.StatusOK, scan)
+		return
+	}
+
+	action := parts[1]
+	switch action {
+	case "events":
+		// GET /api/v1/scans/{scan_id}/events
+		ds.handleScanEvents(w, r, scanID)
+
+	case "report":
+		// GET /api/v1/scans/{scan_id}/report
+		if scan.Report == nil {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "report not ready yet"})
+			return
+		}
+		if strings.Contains(r.Header.Get("Accept"), "text/html") {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(scanner.GenerateHTMLReport(scan.Report)))
+			return
+		}
+		writeJSON(w, http.StatusOK, scan.Report)
+
+	case "export":
+		if len(parts) < 3 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing export format (json, jsonl, csv, pdf)"})
+			return
+		}
+		if scan.Report == nil {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "report not ready for export"})
+			return
+		}
+
+		format := strings.ToLower(parts[2])
+		scanner.IncExportRequests()
+
+		switch format {
+		case "json":
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s-report.json\"", scanID))
+			_ = scanner.ExportJSON(w, scan.Report)
+
+		case "jsonl":
+			w.Header().Set("Content-Type", "application/x-ndjson; charset=utf-8")
+			w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s-report.jsonl\"", scanID))
+			_ = scanner.ExportJSONL(w, scan.Report)
+
+		case "csv":
+			w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+			w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s-findings.csv\"", scanID))
+			_ = scanner.ExportCSV(w, scan.Report)
+
+		case "pdf":
+			pdfPath := filepath.Join(ds.cfg.DatabaseDir, "reports", fmt.Sprintf("%s.pdf", scanID))
+			if _, err := os.Stat(pdfPath); err == nil {
+				w.Header().Set("Content-Type", "application/pdf")
+				w.Header().Set("Content-Disposition", fmt.Sprintf("inline; filename=\"%s-report.pdf\"", scanID))
+				http.ServeFile(w, r, pdfPath)
+				return
+			}
+			// Fallback: render standalone printable HTML
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.Header().Set("Content-Disposition", fmt.Sprintf("inline; filename=\"%s-report.html\"", scanID))
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(scanner.GenerateHTMLReport(scan.Report)))
+
+		default:
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unsupported export format: " + format})
+		}
+
+	default:
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "endpoint not found"})
+	}
+}
+
+func (ds *DashboardServer) handleScanEvents(w http.ResponseWriter, r *http.Request, scanID string) {
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "Streaming unsupported!", http.StatusInternalServerError)
+		return
+	}
+
+	ch, history, unsubscribe := ds.scannerMgr.SubscribeEvents(scanID)
+	defer unsubscribe()
+
+	// Initial connect handshake
+	fmt.Fprint(w, ": connected\n\n")
+
+	// Stream buffered historical events to fast-forward state
+	for _, ev := range history {
+		data, err := json.Marshal(ev.Data)
+		if err == nil {
+			fmt.Fprintf(w, "event: %s\ndata: %s\n\n", ev.Event, string(data))
+		}
+	}
+	flusher.Flush()
+
+	heartbeat := time.NewTicker(10 * time.Second)
+	defer heartbeat.Stop()
+
+	for {
+		select {
+		case ev, ok := <-ch:
+			if !ok {
+				return
+			}
+			data, err := json.Marshal(ev.Data)
+			if err == nil {
+				fmt.Fprintf(w, "event: %s\ndata: %s\n\n", ev.Event, string(data))
+				flusher.Flush()
+			}
+			if ev.Event == "scan.completed" || ev.Event == "scan.failed" || ev.Event == "scan.cancelled" {
+				return
+			}
+		case <-heartbeat.C:
+			fmt.Fprint(w, ": ping\n\n")
+			flusher.Flush()
+		case <-r.Context().Done():
+			return
+		}
 	}
 }

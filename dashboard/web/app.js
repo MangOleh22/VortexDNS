@@ -625,6 +625,7 @@ var PAGE_LOADERS = {
   acl:         loadAclPage,
   metrics:     loadMetricsPage,
   settings:    loadSettings,
+  webintel:    loadWebIntelPage,
 };
 
 // Combined log page loads whichever tab is active.
@@ -1993,6 +1994,966 @@ function mainLoop() {
   }
   var refresh = LIVE_PAGES[state.page];
   return refresh ? refresh() : fetchStats();
+}
+
+/* ═══════════════════════════════════════════════════════════
+   WEBSITE INTELLIGENCE & URL SCANNER (OBJECTIVE 14)
+═══════════════════════════════════════════════════════════ */
+
+var wiState = {
+  activeScan:       null,
+  activeReport:     null,
+  scanSSE:          null,
+  scanStartTime:    null,
+  elapsedTimer:     null,
+  history:          [],
+  activeDetailTab:  'overview',
+  activeView:       'scan',
+  filterSeverity:   'all',
+};
+
+function loadWebIntelPage() {
+  loadEngineStatus();
+  loadScanHistory();
+  if (wiState.activeReport) {
+    renderScanReport(wiState.activeReport);
+  }
+}
+
+function switchWiView(view, el) {
+  wiState.activeView = view;
+  var parent = el ? el.closest('.tabs') : $('wi-top-tabs');
+  if (parent) {
+    parent.querySelectorAll('.tab-item').forEach(function (t) { t.classList.remove('active'); });
+    if (el) el.classList.add('active');
+  }
+
+  document.querySelectorAll('.wi-view').forEach(function (v) { v.classList.add('hidden'); });
+  var target = $('wi-view-' + view);
+  if (target) target.classList.remove('hidden');
+
+  if (view === 'history') loadScanHistory();
+  if (view === 'engine') loadEngineStatus();
+}
+
+function switchWiDetailTab(tab, el) {
+  wiState.activeDetailTab = tab;
+  var parent = el ? el.closest('.tabs') : $('wi-detail-tabs');
+  if (parent) {
+    parent.querySelectorAll('.tab-item').forEach(function (t) { t.classList.remove('active'); });
+    if (el) el.classList.add('active');
+  }
+
+  document.querySelectorAll('.wi-pane').forEach(function (p) { p.classList.add('hidden'); });
+  var pane = $('wi-pane-' + tab);
+  if (pane) pane.classList.remove('hidden');
+}
+
+function toggleWiAdvanced() {
+  var el = $('wi-advanced-opts');
+  if (el) el.classList.toggle('hidden');
+}
+
+function startWebScan() {
+  var urlInput = trimVal('wi-input-url');
+  if (!urlInput) {
+    showToast('✕ Harap masukkan URL website yang valid', 'red');
+    return;
+  }
+
+  var pages = parseInt(getVal('wi-opt-pages'), 10) || 50;
+  var depth = parseInt(getVal('wi-opt-depth'), 10) || 3;
+  var concurrency = parseInt(getVal('wi-opt-concurrency'), 10) || 5;
+  var timeout = parseInt(getVal('wi-opt-timeout'), 10) || 15;
+
+  var payload = {
+    url: urlInput,
+    config: {
+      max_pages: pages,
+      max_depth: depth,
+      max_concurrency: concurrency,
+      request_timeout_seconds: timeout,
+    },
+  };
+
+  var btnStart = $('wi-btn-start');
+  var btnCancel = $('wi-btn-cancel');
+  if (btnStart) btnStart.disabled = true;
+
+  apiFetch('/v1/scans', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }).then(function (scan) {
+    if (btnStart) btnStart.disabled = false;
+    if (btnStart) btnStart.classList.add('hidden');
+    if (btnCancel) btnCancel.classList.remove('hidden');
+
+    wiState.activeScan = scan;
+    wiState.activeReport = null;
+    wiState.scanStartTime = Date.now();
+
+    // Show live box and reset meters
+    var liveBox = $('wi-live-box');
+    if (liveBox) liveBox.classList.remove('hidden');
+    var detailBox = $('wi-detail-box');
+    if (detailBox) detailBox.classList.remove('hidden');
+
+    setText('wi-live-target', scan.url);
+    setText('wi-live-id', scan.id);
+    setText('wi-live-stage', 'Queued');
+    setText('wi-live-pct', '0%');
+    var bar = $('wi-live-bar');
+    if (bar) bar.style.width = '0%';
+
+    var pill = $('wi-live-status-pill');
+    if (pill) { pill.className = 'pill cyan'; pill.textContent = 'RUNNING'; }
+
+    // Start elapsed counter
+    if (wiState.elapsedTimer) clearInterval(wiState.elapsedTimer);
+    wiState.elapsedTimer = setInterval(function () {
+      var s = Math.floor((Date.now() - wiState.scanStartTime) / 1000);
+      setText('wi-live-elapsed', s + 's');
+    }, 1000);
+
+    // Connect SSE stream
+    connectWebScanSSE(scan.id);
+    showToast('⚡ Scan website dimulai: ' + scan.target_host, 'green');
+  }).catch(function (err) {
+    if (btnStart) btnStart.disabled = false;
+    showToast('✕ ' + (err.message || 'Gagal memulai scan'), 'red');
+  });
+}
+
+function cancelWebScan() {
+  if (!wiState.activeScan) return;
+  var id = wiState.activeScan.id;
+  apiFetch('/v1/scans/' + id, { method: 'DELETE' }).then(function () {
+    showToast('✓ Scan website dibatalkan', 'yellow');
+    var pill = $('wi-live-status-pill');
+    if (pill) { pill.className = 'pill yellow'; pill.textContent = 'CANCELLED'; }
+    var btnStart = $('wi-btn-start');
+    var btnCancel = $('wi-btn-cancel');
+    if (btnStart) btnStart.classList.remove('hidden');
+    if (btnCancel) btnCancel.classList.add('hidden');
+    if (wiState.scanSSE) { wiState.scanSSE.close(); wiState.scanSSE = null; }
+    if (wiState.elapsedTimer) { clearInterval(wiState.elapsedTimer); wiState.elapsedTimer = null; }
+  }).catch(function (err) {
+    showToast('✕ ' + (err.message || 'Gagal membatalkan scan'), 'red');
+  });
+}
+
+function connectWebScanSSE(scanID) {
+  if (wiState.scanSSE) {
+    wiState.scanSSE.close();
+    wiState.scanSSE = null;
+  }
+
+  var sseUrl = '/api/v1/scans/' + scanID + '/events';
+  var es = new EventSource(sseUrl);
+  wiState.scanSSE = es;
+
+  var crit = 0, high = 0, med = 0, low = 0, info = 0;
+
+  es.addEventListener('scan.progress', function (e) {
+    try {
+      var d = JSON.parse(e.data);
+      if (d.progress !== undefined) {
+        setText('wi-live-pct', d.progress + '%');
+        var bar = $('wi-live-bar');
+        if (bar) bar.style.width = d.progress + '%';
+      }
+      if (d.stage) setText('wi-live-stage', d.stage);
+      if (d.pages_scanned !== undefined && d.pages_discovered !== undefined) {
+        setText('wi-m-pages', d.pages_scanned + ' / ' + d.pages_discovered);
+      }
+    } catch (err) { /* ignore */ }
+  });
+
+  es.addEventListener('tls.completed', function (e) {
+    try {
+      var d = JSON.parse(e.data);
+      setText('wi-m-tls', (d.score || 0) + ' / 100');
+    } catch (err) { /* ignore */ }
+  });
+
+  es.addEventListener('technology.detected', function (e) {
+    try {
+      var d = JSON.parse(e.data);
+      // dynamically update summary indicator
+    } catch (err) { /* ignore */ }
+  });
+
+  es.addEventListener('ai.detected', function (e) {
+    try {
+      var d = JSON.parse(e.data);
+      setText('wi-m-ai', d.technology || 'AI Detected');
+    } catch (err) { /* ignore */ }
+  });
+
+  es.addEventListener('security.finding', function (e) {
+    try {
+      var d = JSON.parse(e.data);
+      var sev = String(d.severity || '').toLowerCase();
+      if (sev === 'critical') crit++;
+      else if (sev === 'high') high++;
+      else if (sev === 'medium') med++;
+      else if (sev === 'low') low++;
+      else info++;
+
+      setText('wi-pill-crit', crit + ' Critical');
+      setText('wi-pill-high', high + ' High');
+      setText('wi-pill-med', med + ' Medium');
+      setText('wi-pill-low', low + ' Low');
+      setText('wi-pill-info', info + ' Info');
+      setText('wi-m-findings', crit + high + med + low + info);
+    } catch (err) { /* ignore */ }
+  });
+
+  es.addEventListener('scan.completed', function (e) {
+    es.close();
+    wiState.scanSSE = null;
+    if (wiState.elapsedTimer) { clearInterval(wiState.elapsedTimer); wiState.elapsedTimer = null; }
+
+    var btnStart = $('wi-btn-start');
+    var btnCancel = $('wi-btn-cancel');
+    if (btnStart) btnStart.classList.remove('hidden');
+    if (btnCancel) btnCancel.classList.add('hidden');
+
+    var pill = $('wi-live-status-pill');
+    if (pill) { pill.className = 'pill green'; pill.textContent = 'COMPLETED'; }
+    setText('wi-live-stage', 'Completed & Report Generated');
+    setText('wi-live-pct', '100%');
+    var bar = $('wi-live-bar');
+    if (bar) bar.style.width = '100%';
+
+    showToast('✓ Scan website selesai! Laporan siap.', 'green');
+
+    // Fetch full report and render all tabs
+    fetchFullScanReport(scanID);
+    loadScanHistory();
+  });
+
+  es.addEventListener('scan.cancelled', function () {
+    es.close();
+    wiState.scanSSE = null;
+    if (wiState.elapsedTimer) { clearInterval(wiState.elapsedTimer); wiState.elapsedTimer = null; }
+    var pill = $('wi-live-status-pill');
+    if (pill) { pill.className = 'pill yellow'; pill.textContent = 'CANCELLED'; }
+    setText('wi-live-stage', 'Cancelled by user');
+  });
+
+  es.addEventListener('scan.failed', function (e) {
+    es.close();
+    wiState.scanSSE = null;
+    if (wiState.elapsedTimer) { clearInterval(wiState.elapsedTimer); wiState.elapsedTimer = null; }
+    var pill = $('wi-live-status-pill');
+    if (pill) { pill.className = 'pill red'; pill.textContent = 'FAILED'; }
+    setText('wi-live-stage', 'Scan failed');
+    showToast('✕ Scan gagal dilakukan', 'red');
+  });
+
+  es.onerror = function () {
+    // Keep connection open or fallback to poll
+  };
+}
+
+function fetchFullScanReport(scanID) {
+  apiFetch('/v1/scans/' + scanID).then(function (scan) {
+    wiState.activeScan = scan;
+    if (scan.report) {
+      wiState.activeReport = scan.report;
+      renderScanReport(scan.report);
+    }
+  });
+}
+
+function renderScanReport(rep) {
+  if (!rep) return;
+
+  // Update top metrics
+  setText('wi-m-pages', (rep.scan_config.max_pages || 0) + ' limit');
+  setText('wi-m-reqs', num(rep.network.total_requests || 0));
+  var mb = (rep.network.total_bytes || 0) / (1024 * 1024);
+  setText('wi-m-bytes', mb.toFixed(2) + ' MB');
+  if (rep.tls) {
+    setText('wi-m-tls', rep.tls.score + ' / 100');
+  } else {
+    setText('wi-m-tls', 'N/A (HTTP)');
+  }
+  setText('wi-m-ai', rep.summary.ai_native_status || 'None');
+  setText('wi-m-findings', (rep.security ? rep.security.length : 0));
+
+  setText('wi-pill-crit', (rep.summary.critical_count || 0) + ' Critical');
+  setText('wi-pill-high', (rep.summary.high_count || 0) + ' High');
+  setText('wi-pill-med', (rep.summary.medium_count || 0) + ' Medium');
+  setText('wi-pill-low', (rep.summary.low_count || 0) + ' Low');
+  setText('wi-pill-info', (rep.summary.info_count || 0) + ' Info');
+
+  // Render individual tabs
+  renderOverviewTab(rep);
+  renderLighthouseTab(rep);
+  renderTlsTab(rep);
+  renderSecurityTab(rep);
+  renderTechTab(rep);
+  renderAiTab(rep);
+  renderRoutesTab(rep);
+  renderNetworkTab(rep);
+  renderPerfTab(rep);
+  renderPwaTab(rep);
+  renderFindingsTab(rep);
+  renderMitigationTab(rep);
+  renderRawDataTab(rep);
+}
+
+function renderOverviewTab(rep) {
+  var cardsEl = $('wi-overview-cards');
+  if (cardsEl) {
+    cardsEl.innerHTML =
+      '<div class="stat-card" style="padding:14px;"><div class="sc-label">Website Health</div><div class="sc-value" style="font-size:16px;">' + esc(rep.summary.website_health) + '</div></div>' +
+      '<div class="stat-card" style="padding:14px;"><div class="sc-label">TLS Posture</div><div class="sc-value" style="font-size:16px;color:var(--green);">' + esc(rep.summary.tls_posture) + '</div></div>' +
+      '<div class="stat-card" style="padding:14px;"><div class="sc-label">AI Architecture</div><div class="sc-value" style="font-size:16px;color:var(--cyan);">' + esc(rep.summary.ai_native_status) + '</div></div>';
+  }
+
+  var sumEl = $('wi-ov-summary-text');
+  if (sumEl) {
+    sumEl.innerHTML =
+      'Pemeriksaan keamanan dan telemetri website publik untuk domain <strong>' + esc(rep.target.host) + '</strong> telah selesai. ' +
+      'Sistem mengidentifikasi <strong>' + (rep.technologies ? rep.technologies.length : 0) + ' teknologi</strong>, ' +
+      '<strong>' + (rep.network.total_requests || 0) + ' permintaan HTTP</strong>, serta <strong>' +
+      (rep.summary.critical_count + rep.summary.high_count) + ' temuan berprioritas tinggi</strong>. ' +
+      'Semua inspeksi dilakukan secara non-destruktif dan terlindungi dari risiko SSRF.';
+  }
+}
+
+function renderLighthouseTab(rep) {
+  var el = $('wi-lh-container');
+  if (!el) return;
+  var lh = rep.lighthouse;
+  if (!lh || lh.status !== 'available') {
+    el.innerHTML =
+      '<div class="alert" style="background:rgba(0,212,255,.05);border-color:var(--border);"><span class="pill gray">STATUS: UNAVAILABLE</span> ' +
+      '<span style="margin-left:8px;color:var(--text2);font-size:12px;">Google Lighthouse CLI tidak terinstal pada sistem operasi host. Metrik tidak direkayasa (sesuai spesifikasi non-fabrikasi).</span></div>';
+    return;
+  }
+
+  function pillScore(score) {
+    if (score === null || score === undefined) return '—';
+    var color = score >= 90 ? 'var(--green)' : (score >= 50 ? 'var(--yellow)' : 'var(--red)');
+    return '<span style="color:' + color + ';font-size:22px;font-weight:700;">' + score + '</span>';
+  }
+
+  el.innerHTML =
+    '<div class="g g4 mb16">' +
+      '<div class="stat-card" style="text-align:center;"><div class="sc-label">Performance</div>' + pillScore(lh.performance) + '</div>' +
+      '<div class="stat-card" style="text-align:center;"><div class="sc-label">Accessibility</div>' + pillScore(lh.accessibility) + '</div>' +
+      '<div class="stat-card" style="text-align:center;"><div class="sc-label">Best Practices</div>' + pillScore(lh.best_practices) + '</div>' +
+      '<div class="stat-card" style="text-align:center;"><div class="sc-label">SEO</div>' + pillScore(lh.seo) + '</div>' +
+    '</div>' +
+    '<table class="data-table">' +
+      '<thead><tr><th>Core Web Vital</th><th>Measured Timing</th></tr></thead>' +
+      '<tbody>' +
+        '<tr><td>First Contentful Paint (FCP)</td><td><strong>' + (lh.metrics.fcp_ms ? lh.metrics.fcp_ms.toFixed(1) + ' ms' : '—') + '</strong></td></tr>' +
+        '<tr><td>Largest Contentful Paint (LCP)</td><td><strong>' + (lh.metrics.lcp_ms ? lh.metrics.lcp_ms.toFixed(1) + ' ms' : '—') + '</strong></td></tr>' +
+        '<tr><td>Total Blocking Time (TBT)</td><td><strong>' + (lh.metrics.tbt_ms ? lh.metrics.tbt_ms.toFixed(1) + ' ms' : '—') + '</strong></td></tr>' +
+        '<tr><td>Cumulative Layout Shift (CLS)</td><td><strong>' + (lh.metrics.cls !== undefined && lh.metrics.cls !== null ? lh.metrics.cls.toFixed(3) : '—') + '</strong></td></tr>' +
+      '</tbody>' +
+    '</table>';
+}
+
+function renderTlsTab(rep) {
+  var el = $('wi-tls-container');
+  if (!el) return;
+  var tls = rep.tls;
+  if (!tls) {
+    el.innerHTML = '<div class="alert warn">Target tidak menggunakan protokol HTTPS/TLS (Plaintext HTTP).</div>';
+    return;
+  }
+
+  var checksHtml = (tls.checks || []).map(function (c) {
+    var badgeClass = c.severity === 'critical' ? 'red' : (c.severity === 'high' ? 'orange' : (c.severity === 'medium' ? 'purple' : 'green'));
+    return '<tr>' +
+      '<td><code>' + esc(c.check) + '</code></td>' +
+      '<td><span class="pill ' + badgeClass + '">' + esc(c.severity) + '</span></td>' +
+      '<td>' + esc(c.observed) + '</td>' +
+      '<td>' + esc(c.recommendation) + '</td>' +
+    '</tr>';
+  }).join('');
+
+  el.innerHTML =
+    '<div class="card mb12" style="background:var(--bg-base);">' +
+      '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">' +
+        '<div><strong>TLS Posture Score:</strong> <span style="font-size:20px;font-weight:700;color:var(--green);">' + tls.score + ' / 100</span></div>' +
+        '<div><strong>Protocol:</strong> <span class="pill cyan">' + esc(tls.tls_version) + '</span></div>' +
+        '<div><strong>Days to Expiry:</strong> <strong>' + tls.days_until_expiration + ' days</strong></div>' +
+      '</div>' +
+      '<div style="font-size:12px;color:var(--text2);margin-top:10px;line-height:1.6;">' +
+        '<div><strong>Subject:</strong> ' + esc(tls.subject) + '</div>' +
+        '<div><strong>Issuer:</strong> ' + esc(tls.issuer) + '</div>' +
+        '<div><strong>Cipher Suite:</strong> ' + esc(tls.cipher_suite) + '</div>' +
+        '<div><strong>Public Key:</strong> ' + esc(tls.public_key_algorithm) + ' (' + tls.public_key_size + ' bits)</div>' +
+        '<div><strong>OCSP Stapling:</strong> ' + esc(tls.ocsp_stapling) + '</div>' +
+      '</div>' +
+    '</div>' +
+    '<table class="data-table">' +
+      '<thead><tr><th>Explainable Check</th><th>Severity</th><th>Observed Value</th><th>Recommendation</th></tr></thead>' +
+      '<tbody>' + checksHtml + '</tbody>' +
+    '</table>';
+}
+
+function renderSecurityTab(rep) {
+  var el = $('wi-security-container');
+  if (!el) return;
+  var httpRes = rep.http;
+  if (!httpRes) {
+    el.innerHTML = '<div class="alert warn">Hasil HTTP tidak tersedia.</div>';
+    return;
+  }
+
+  var rows = Object.keys(httpRes.security_headers || {}).map(function (k) {
+    var h = httpRes.security_headers[k];
+    var pill = h.present ? '<span class="pill green">PRESENT</span>' : '<span class="pill red">MISSING</span>';
+    return '<tr>' +
+      '<td><strong>' + esc(k) + '</strong></td>' +
+      '<td>' + pill + '</td>' +
+      '<td><code style="font-size:11px;">' + esc(h.value || '—') + '</code></td>' +
+      '<td>' + esc(h.recommendation || '—') + '</td>' +
+    '</tr>';
+  }).join('');
+
+  var cors = httpRes.cors || {};
+  var corsPill = cors.wildcard_with_credentials ? '<span class="pill red">VULNERABLE</span>' : (cors.allow_origin ? '<span class="pill yellow">CONFIGURED</span>' : '<span class="pill green">SAME-ORIGIN</span>');
+
+  el.innerHTML =
+    '<div class="card mb12" style="background:var(--bg-base);">' +
+      '<div class="card-title">CORS & Cookie Configuration</div>' +
+      '<div style="font-size:12px;margin-bottom:6px;"><strong>Cross-Origin Resource Sharing (CORS):</strong> ' + corsPill + ' ' + esc(cors.risk_description || '') + '</div>' +
+      '<div style="font-size:12px;"><strong>Observable Cookies:</strong> ' + (httpRes.cookies ? httpRes.cookies.length : 0) + ' cookies analyzed.</div>' +
+    '</div>' +
+    '<table class="data-table">' +
+      '<thead><tr><th>Security Header</th><th>Status</th><th>Value</th><th>Guidance</th></tr></thead>' +
+      '<tbody>' + rows + '</tbody>' +
+    '</table>';
+}
+
+function renderTechTab(rep) {
+  var el = $('wi-tech-container');
+  if (!el) return;
+  var techs = rep.technologies || [];
+  if (!techs.length) {
+    el.innerHTML = '<div class="alert info">Tidak ada sidik jari teknologi publik yang terdeteksi dengan tingkat keyakinan tinggi.</div>';
+    return;
+  }
+
+  var rows = techs.map(function (t) {
+    var confPct = Math.round((t.confidence || 0) * 100);
+    var confClass = confPct >= 90 ? 'green' : (confPct >= 70 ? 'yellow' : 'gray');
+    var evList = (t.evidence || []).map(function (e) { return '<li>' + esc(e) + '</li>'; }).join('');
+
+    return '<tr>' +
+      '<td><strong>' + esc(t.technology) + '</strong></td>' +
+      '<td><span class="pill cyan">' + esc(t.category) + '</span></td>' +
+      '<td><span class="pill ' + confClass + '">' + confPct + '% Confirmed</span></td>' +
+      '<td><ul style="padding-left:16px;font-size:11px;color:var(--text2);">' + evList + '</ul></td>' +
+    '</tr>';
+  }).join('');
+
+  el.innerHTML =
+    '<table class="data-table">' +
+      '<thead><tr><th>Technology</th><th>Category</th><th>Confidence</th><th>Technical Evidence</th></tr></thead>' +
+      '<tbody>' + rows + '</tbody>' +
+    '</table>';
+}
+
+function renderAiTab(rep) {
+  var el = $('wi-ai-container');
+  if (!el) return;
+  var ai = rep.ai || {};
+  var findings = ai.findings || [];
+  var secrets = ai.secrets || [];
+
+  var classColor = ai.classification === 'AI-native architecture indicators' ? 'var(--cyan)' : (ai.classification === 'AI-enabled' ? 'var(--blue)' : 'var(--text2)');
+
+  var html =
+    '<div class="card mb12" style="background:var(--bg-base);">' +
+      '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">' +
+        '<div><strong>AI-Native Classification:</strong> <span style="font-size:16px;font-weight:700;color:' + classColor + ';">' + esc(ai.classification || 'None') + '</span></div>' +
+        '<div><strong>Confidence:</strong> <strong>' + Math.round((ai.confidence || 0) * 100) + '%</strong></div>' +
+      '</div>' +
+    '</div>';
+
+  if (secrets.length > 0) {
+    var secRows = secrets.map(function (s) {
+      return '<tr>' +
+        '<td><strong>' + esc(s.secret_type) + '</strong></td>' +
+        '<td><code style="color:var(--red);">' + esc(s.redacted_value) + '</code></td>' +
+        '<td><span class="pill red">CRITICAL</span></td>' +
+        '<td>' + esc(s.location) + '</td>' +
+      '</tr>';
+    }).join('');
+
+    html += '<h4 style="color:var(--red);margin:16px 0 8px;">⚠ Exposed Credentials Discovered (REDACTED)</h4>' +
+      '<table class="data-table mb16">' +
+        '<thead><tr><th>Secret Type</th><th>Redacted Value</th><th>Severity</th><th>Location</th></tr></thead>' +
+        '<tbody>' + secRows + '</tbody>' +
+      '</table>';
+  }
+
+  if (findings.length > 0) {
+    var fRows = findings.map(function (f) {
+      return '<tr>' +
+        '<td><strong>' + esc(f.technology) + '</strong></td>' +
+        '<td>' + esc(f.provider) + '</td>' +
+        '<td>' + esc(f.capability) + '</td>' +
+        '<td>' + esc((f.evidence || []).join('; ')) + '</td>' +
+      '</tr>';
+    }).join('');
+
+    html += '<h4 style="margin:16px 0 8px;">Observable AI Capabilities & Endpoints</h4>' +
+      '<table class="data-table">' +
+        '<thead><tr><th>Technology</th><th>Provider</th><th>Capability</th><th>Observed Evidence</th></tr></thead>' +
+        '<tbody>' + fRows + '</tbody>' +
+      '</table>';
+  } else {
+    html += '<div class="alert info">Tidak ada kapabilitas AI native yang terdeteksi dari aset website publik.</div>';
+  }
+
+  el.innerHTML = html;
+}
+
+function renderRoutesTab(rep) {
+  var el = $('wi-routes-container');
+  if (!el) return;
+  var routes = rep.routes || {};
+  var nodes = routes.nodes || [];
+
+  if (!nodes.length) {
+    el.innerHTML = '<div class="alert info">Graf arsitektur tidak tersedia.</div>';
+    return;
+  }
+
+  var nodeRows = nodes.map(function (n) {
+    var tpBadge = n.is_third_party ? '<span class="pill yellow">Third-Party</span>' : '<span class="pill cyan">1st-Party</span>';
+    return '<tr>' +
+      '<td><strong>' + esc(n.label) + '</strong></td>' +
+      '<td>' + esc(n.category) + '</td>' +
+      '<td>' + tpBadge + '</td>' +
+      '<td>' + esc(n.protocol) + '</td>' +
+      '<td>' + n.request_count + ' reqs</td>' +
+      '<td>' + (n.latency_ms || 0) + ' ms</td>' +
+    '</tr>';
+  }).join('');
+
+  el.innerHTML =
+    '<div class="card mb12" style="background:var(--bg-base);">' +
+      '<div class="card-title">Network Architecture Graph</div>' +
+      '<p style="font-size:12px;color:var(--text2);">Diagram topologi jaringan dan dependensi yang diakses oleh website target selama proses inspeksi:</p>' +
+      '<pre style="padding:12px;background:rgba(0,0,0,.4);border-radius:6px;font-size:12px;color:var(--cyan);margin-top:8px;">' +
+'User Browser\n' +
+'   │\n' +
+'   ▼\n' +
+esc(rep.target.host) + '\n' +
+'   ├────► Static Assets (Scripts & Stylesheets)\n' +
+'   ├────► API Routes & Endpoints\n' +
+'   ├────► Edge CDN / Infrastructure\n' +
+'   └────► Third-Party External Services' +
+      '</pre>' +
+    '</div>' +
+    '<table class="data-table">' +
+      '<thead><tr><th>Architecture Node</th><th>Category</th><th>Scope</th><th>Protocol</th><th>Traffic</th><th>Avg Latency</th></tr></thead>' +
+      '<tbody>' + nodeRows + '</tbody>' +
+    '</table>';
+}
+
+function renderNetworkTab(rep) {
+  var el = $('wi-network-container');
+  if (!el) return;
+  var net = rep.network || {};
+  var deps = net.dependencies || [];
+  var wf = net.waterfall || [];
+
+  var depRows = (deps.length > 0) ? deps.map(function (d) {
+    return '<tr>' +
+      '<td><strong>' + esc(d.domain) + '</strong></td>' +
+      '<td><span class="pill cyan">' + esc(d.category) + '</span></td>' +
+      '<td>' + d.request_count + '</td>' +
+      '<td>' + ((d.total_bytes || 0) / 1024).toFixed(1) + ' KB</td>' +
+      '<td>' + esc(d.privacy_risk) + '</td>' +
+    '</tr>';
+  }).join('') : '<tr><td colspan="5" style="text-align:center;color:var(--text3);">Belum ada dependensi pihak ketiga tercatat.</td></tr>';
+
+  var wfRows = (wf.length > 0) ? wf.map(function (w) {
+    return '<tr>' +
+      '<td><span style="font-family:var(--font-mono);font-size:11px;" title="' + esc(w.url) + '">' + esc(w.url.substring(0, 60)) + '...</span></td>' +
+      '<td>' + w.ttfb_ms + ' ms</td>' +
+      '<td>' + w.download_ms + ' ms</td>' +
+      '<td><strong>' + w.total_ms + ' ms</strong></td>' +
+    '</tr>';
+  }).join('') : '<tr><td colspan="4" style="text-align:center;color:var(--text3);">Data waterfall tidak tersedia.</td></tr>';
+
+  el.innerHTML =
+    '<div class="g g4 mb16">' +
+      '<div class="stat-card"><div class="sc-label">Total Requests</div><div class="sc-value">' + (net.total_requests || 0) + '</div></div>' +
+      '<div class="stat-card"><div class="sc-label">Total Payload</div><div class="sc-value">' + (((net.total_bytes || 0) / (1024*1024)).toFixed(2)) + ' MB</div></div>' +
+      '<div class="stat-card"><div class="sc-label">1st-Party Requests</div><div class="sc-value" style="color:var(--green);">' + (net.first_party_requests || 0) + '</div></div>' +
+      '<div class="stat-card"><div class="sc-label">3rd-Party Requests</div><div class="sc-value" style="color:var(--yellow);">' + (net.third_party_requests || 0) + '</div></div>' +
+    '</div>' +
+    '<h4 style="margin:16px 0 8px;">Third-Party Domain Dependencies</h4>' +
+    '<table class="data-table mb16">' +
+      '<thead><tr><th>Domain</th><th>Category</th><th>Requests</th><th>Data Size</th><th>Privacy Observation</th></tr></thead>' +
+      '<tbody>' + depRows + '</tbody>' +
+    '</table>' +
+    '<h4 style="margin:16px 0 8px;">Network Waterfall Timings</h4>' +
+    '<table class="data-table">' +
+      '<thead><tr><th>Request URL</th><th>TTFB</th><th>Download</th><th>Total Latency</th></tr></thead>' +
+      '<tbody>' + wfRows + '</tbody>' +
+    '</table>';
+}
+
+function renderPerfTab(rep) {
+  var el = $('wi-perf-container');
+  if (!el) return;
+  var perfs = rep.performance || [];
+  if (!perfs.length) {
+    el.innerHTML = '<div class="alert green">✓ Tidak terdeteksi masalah performa atau latensi yang signifikan.</div>';
+    return;
+  }
+
+  var rows = perfs.map(function (p) {
+    return '<tr>' +
+      '<td><code>' + esc(p.id) + '</code></td>' +
+      '<td><strong>' + esc(p.metric) + '</strong></td>' +
+      '<td>' + esc(p.observed_value) + '</td>' +
+      '<td>' + esc(p.threshold) + '</td>' +
+      '<td>' + esc(p.impact) + '</td>' +
+      '<td>' + esc(p.recommendation) + '</td>' +
+    '</tr>';
+  }).join('');
+
+  el.innerHTML =
+    '<table class="data-table">' +
+      '<thead><tr><th>ID</th><th>Performance Metric</th><th>Observed</th><th>Threshold</th><th>Impact</th><th>Actionable Recommendation</th></tr></thead>' +
+      '<tbody>' + rows + '</tbody>' +
+    '</table>';
+}
+
+function renderPwaTab(rep) {
+  var el = $('wi-pwa-container');
+  if (!el) return;
+  var pwa = rep.pwa;
+  if (!pwa) {
+    el.innerHTML = '<div class="alert info">Data PWA tidak tersedia.</div>';
+    return;
+  }
+
+  el.innerHTML =
+    '<div class="g g4 mb16">' +
+      '<div class="stat-card"><div class="sc-label">Web App Manifest</div><div class="sc-value">' + (pwa.has_manifest ? '✓ Detected' : '✕ Missing') + '</div></div>' +
+      '<div class="stat-card"><div class="sc-label">Service Worker</div><div class="sc-value">' + (pwa.has_service_worker ? '✓ Registered' : '✕ None') + '</div></div>' +
+      '<div class="stat-card"><div class="sc-label">Installable</div><div class="sc-value" style="color:' + (pwa.installable ? 'var(--green)' : 'var(--yellow)') + '">' + (pwa.installable ? 'Yes' : 'No') + '</div></div>' +
+      '<div class="stat-card"><div class="sc-label">Offline Ready</div><div class="sc-value">' + (pwa.offline_ready ? 'Yes' : 'No') + '</div></div>' +
+    '</div>' +
+    '<div class="card" style="background:var(--bg-base);font-size:12px;line-height:1.6;">' +
+      '<div><strong>App Name:</strong> ' + esc(pwa.name || '—') + ' (Short: ' + esc(pwa.short_name || '—') + ')</div>' +
+      '<div><strong>Display Mode:</strong> ' + esc(pwa.display_mode || 'browser') + '</div>' +
+      '<div><strong>Start URL:</strong> ' + esc(pwa.start_url || '—') + '</div>' +
+      '<div><strong>Theme Color:</strong> ' + esc(pwa.theme_color || '—') + '</div>' +
+      '<div><strong>Icons Count:</strong> ' + (pwa.icons_count || 0) + '</div>' +
+    '</div>';
+}
+
+function renderFindingsTab(rep) {
+  var el = $('wi-findings-container');
+  if (!el) return;
+  var findings = rep.security || [];
+
+  if (wiState.filterSeverity && wiState.filterSeverity !== 'all') {
+    findings = findings.filter(function (f) {
+      return String(f.severity).toLowerCase() === wiState.filterSeverity;
+    });
+  }
+
+  if (!findings.length) {
+    el.innerHTML = '<div class="alert info">Tidak ada temuan risiko pada filter ini.</div>';
+    return;
+  }
+
+  var rows = findings.map(function (f) {
+    var badgeClass = f.severity === 'critical' ? 'red' : (f.severity === 'high' ? 'orange' : (f.severity === 'medium' ? 'purple' : 'green'));
+    return '<tr>' +
+      '<td><code>' + esc(f.id) + '</code></td>' +
+      '<td><span class="pill ' + badgeClass + '">' + esc(f.severity) + '</span></td>' +
+      '<td><strong>' + esc(f.title) + '</strong></td>' +
+      '<td>' + esc(f.affected_asset) + '</td>' +
+      '<td>' + esc(f.impact) + '</td>' +
+      '<td>' + esc(f.mitigation ? f.mitigation.action : '—') + '</td>' +
+    '</tr>';
+  }).join('');
+
+  el.innerHTML =
+    '<table class="data-table">' +
+      '<thead><tr><th>ID</th><th>Severity</th><th>Finding Title</th><th>Affected Asset</th><th>Impact</th><th>Action</th></tr></thead>' +
+      '<tbody>' + rows + '</tbody>' +
+    '</table>';
+}
+
+function filterFindingsTable(val) {
+  wiState.filterSeverity = val;
+  if (wiState.activeReport) {
+    renderFindingsTab(wiState.activeReport);
+  }
+}
+
+function renderMitigationTab(rep) {
+  var el = $('wi-mitigation-container');
+  if (!el) return;
+  var groups = rep.mitigations || [];
+
+  var html = '';
+  groups.forEach(function (g) {
+    if (!g.items || !g.items.length) return;
+    html += '<div class="card mb16" style="background:var(--bg-base);">' +
+      '<div class="card-title" style="color:var(--cyan);">' + esc(g.timeframe) + ' Actions (' + g.items.length + ' items)</div>';
+
+    g.items.forEach(function (item) {
+      var badgeClass = item.severity === 'critical' ? 'red' : (item.severity === 'high' ? 'orange' : 'purple');
+      html += '<div style="margin-bottom:14px;border-left:3px solid var(--cyan);padding-left:12px;">' +
+        '<div><strong>[' + esc(item.id) + '] ' + esc(item.title) + '</strong> <span class="pill ' + badgeClass + '" style="font-size:10px;">' + esc(item.severity) + '</span></div>' +
+        '<div style="font-size:12px;color:var(--text2);margin:4px 0;"><strong>Problem:</strong> ' + esc(item.description) + '</div>' +
+        '<div style="font-size:12px;margin:4px 0;"><strong>Action:</strong> ' + esc(item.mitigation ? item.mitigation.action : '') + '</div>' +
+        '<div style="font-size:12px;color:var(--green);margin:4px 0;"><strong>Verification:</strong> ' + esc(item.mitigation ? item.mitigation.verification : '') + '</div>' +
+      '</div>';
+    });
+
+    html += '</div>';
+  });
+
+  if (!html) {
+    html = '<div class="alert green">✓ Tidak ada tindakan mitigasi mendesak yang diperlukan.</div>';
+  }
+
+  el.innerHTML = html;
+}
+
+function renderRawDataTab(rep) {
+  var el = $('wi-raw-json');
+  if (el) {
+    el.textContent = JSON.stringify(rep, null, 2);
+  }
+}
+
+function exportScan(format) {
+  if (!wiState.activeScan) {
+    showToast('✕ Belum ada scan aktif yang dipilih', 'red');
+    return;
+  }
+  var id = wiState.activeScan.id;
+  var downloadUrl = '/api/v1/scans/' + id + '/export/' + format;
+  window.open(downloadUrl, '_blank');
+}
+
+function viewHtmlReport() {
+  if (!wiState.activeScan) return;
+  var id = wiState.activeScan.id;
+  window.open('/api/v1/scans/' + id + '/report', '_blank');
+}
+
+function loadScanHistory() {
+  apiFetch('/v1/scans?limit=50').then(function (data) {
+    wiState.history = (data && data.scans) || [];
+    setText('wi-hist-count', wiState.history.length);
+
+    var tbody = $('wi-history-tbody');
+    if (!tbody) return;
+
+    if (!wiState.history.length) {
+      tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:var(--text3);">Belum ada riwayat scan website.</td></tr>';
+      return;
+    }
+
+    // Populate compare dropdowns
+    var baseSel = $('wi-cmp-base');
+    var tgtSel = $('wi-cmp-target');
+    if (baseSel && tgtSel) {
+      var opts = wiState.history.map(function (s) {
+        return '<option value="' + esc(s.id) + '">' + esc(s.target_host) + ' (' + fmtTime(s.started_at) + ' - ' + esc(s.id) + ')</option>';
+      }).join('');
+      baseSel.innerHTML = opts;
+      tgtSel.innerHTML = opts;
+      if (wiState.history.length > 1) {
+        tgtSel.selectedIndex = 0;
+        baseSel.selectedIndex = 1;
+      }
+    }
+
+    tbody.innerHTML = wiState.history.map(function (s) {
+      var dur = s.scan_duration_ms ? (s.scan_duration_ms / 1000).toFixed(1) + 's' : '—';
+      var rep = s.report || {};
+      var sum = rep.summary || {};
+      var tlsScore = rep.tls ? rep.tls.score + '/100' : '—';
+      var aiStatus = sum.ai_native_status || '—';
+      var risks = (sum.critical_count || 0) + ' / ' + (sum.high_count || 0) + ' / ' + (sum.medium_count || 0);
+
+      var statusPill = '<span class="pill ' + (s.status === 'completed' ? 'green' : (s.status === 'running' ? 'cyan' : 'yellow')) + '">' + esc(s.status) + '</span>';
+
+      return '<tr>' +
+        '<td><strong>' + esc(s.target_host) + '</strong></td>' +
+        '<td><code>' + esc(s.id) + '</code></td>' +
+        '<td>' + fmtDateTime(s.started_at) + '</td>' +
+        '<td>' + dur + '</td>' +
+        '<td>' + tlsScore + '</td>' +
+        '<td><span style="font-size:11px;">' + esc(aiStatus) + '</span></td>' +
+        '<td>' + risks + '</td>' +
+        '<td>' + statusPill + '</td>' +
+        '<td>' +
+          '<button type="button" class="btn btn-sm" onclick="viewHistoricalScan(\'' + esc(s.id) + '\')" style="margin-right:4px;">Detail</button>' +
+          '<button type="button" class="btn btn-sm btn-danger" onclick="deleteHistoricalScan(\'' + esc(s.id) + '\')">✕</button>' +
+        '</td>' +
+      '</tr>';
+    }).join('');
+  });
+}
+
+function viewHistoricalScan(scanID) {
+  apiFetch('/v1/scans/' + scanID).then(function (scan) {
+    wiState.activeScan = scan;
+    wiState.activeReport = scan.report;
+
+    switchWiView('scan');
+
+    var liveBox = $('wi-live-box');
+    if (liveBox) liveBox.classList.remove('hidden');
+    var detailBox = $('wi-detail-box');
+    if (detailBox) detailBox.classList.remove('hidden');
+
+    setText('wi-live-target', scan.url);
+    setText('wi-live-id', scan.id);
+    setText('wi-live-stage', scan.current_stage || 'Loaded');
+    setText('wi-live-pct', (scan.progress || 100) + '%');
+    var bar = $('wi-live-bar');
+    if (bar) bar.style.width = (scan.progress || 100) + '%';
+
+    var pill = $('wi-live-status-pill');
+    if (pill) {
+      pill.className = 'pill ' + (scan.status === 'completed' ? 'green' : 'yellow');
+      pill.textContent = String(scan.status).toUpperCase();
+    }
+
+    if (scan.report) {
+      renderScanReport(scan.report);
+    }
+  });
+}
+
+function deleteHistoricalScan(scanID) {
+  confirmModal({
+    title: 'Hapus Riwayat Scan',
+    message: 'Apakah Anda yakin ingin menghapus data scan ' + scanID + ' beserta laporan PDF-nya?',
+    okText: 'Hapus',
+    cancelText: 'Batal',
+    danger: true,
+  }).then(function (ok) {
+    if (!ok) return;
+    apiFetch('/v1/scans/' + scanID, { method: 'DELETE' }).then(function () {
+      showToast('✓ Scan dihapus', 'green');
+      loadScanHistory();
+    });
+  });
+}
+
+function runScanCompare() {
+  var bSel = $('wi-cmp-base');
+  var tSel = $('wi-cmp-target');
+  if (!bSel || !tSel) return;
+
+  var base = bSel.value;
+  var target = tSel.value;
+  if (!base || !target) {
+    showToast('✕ Pilih dua scan untuk dibandingkan', 'red');
+    return;
+  }
+  if (base === target) {
+    showToast('✕ Pilih dua scan yang berbeda', 'yellow');
+    return;
+  }
+
+  apiFetch('/v1/scans/compare?base=' + encodeURIComponent(base) + '&target=' + encodeURIComponent(target))
+    .then(function (diff) {
+      var resBox = $('wi-compare-results');
+      if (resBox) resBox.classList.remove('hidden');
+
+      var sumCard = $('wi-cmp-summary-card');
+      if (sumCard) {
+        sumCard.innerHTML =
+          '<div class="card-title">Perbandingan Domain: ' + esc(diff.host) + '</div>' +
+          '<div style="font-size:12px;color:var(--text2);">' +
+            '<div><strong>AI Summary Evolution:</strong> ' + esc(diff.ai_summary_change) + '</div>' +
+            '<div><strong>TLS Posture Differences:</strong> ' + JSON.stringify(diff.tls_changes) + '</div>' +
+          '</div>';
+      }
+
+      var newBox = $('wi-cmp-new-findings');
+      if (newBox) {
+        var newHtml = '<div class="card-title" style="color:var(--red);">+ New Risks Detected (' + diff.new_findings.length + ')</div>';
+        if (diff.new_findings.length > 0) {
+          newHtml += diff.new_findings.map(function (f) {
+            return '<div style="font-size:12px;margin-bottom:6px;"><strong>[' + esc(f.severity) + ']</strong> ' + esc(f.title) + '</div>';
+          }).join('');
+        } else {
+          newHtml += '<div style="font-size:12px;color:var(--green);">Tidak ada risiko baru yang muncul.</div>';
+        }
+        newBox.innerHTML = newHtml;
+      }
+
+      var resBoxEl = $('wi-cmp-res-findings');
+      if (resBoxEl) {
+        var resHtml = '<div class="card-title" style="color:var(--green);">✓ Resolved Risks (' + diff.resolved_findings.length + ')</div>';
+        if (diff.resolved_findings.length > 0) {
+          resHtml += diff.resolved_findings.map(function (f) {
+            return '<div style="font-size:12px;margin-bottom:6px;"><strong>[' + esc(f.severity) + ']</strong> ' + esc(f.title) + '</div>';
+          }).join('');
+        } else {
+          resHtml += '<div style="font-size:12px;color:var(--text3);">Belum ada temuan yang terselesaikan.</div>';
+        }
+        resBoxEl.innerHTML = resHtml;
+      }
+    }).catch(function (err) {
+      showToast('✕ Gagal membandingkan scan: ' + (err.message || ''), 'red');
+    });
+}
+
+function loadEngineStatus() {
+  apiFetch('/v1/scans/engine-status').then(function (st) {
+    if (!st) return;
+    var pdfVal = $('wi-engine-pdf-status');
+    var pdfSub = $('wi-engine-pdf-detail');
+    if (pdfVal) {
+      if (st.pdf && st.pdf.available) {
+        pdfVal.textContent = 'Operational';
+        pdfVal.style.color = 'var(--green)';
+      } else {
+        pdfVal.textContent = 'HTML Fallback';
+        pdfVal.style.color = 'var(--yellow)';
+      }
+    }
+    if (pdfSub && st.pdf) {
+      pdfSub.textContent = st.pdf.engine + (st.pdf.binary ? ' (' + st.pdf.binary + ')' : '');
+    }
+
+    var lhVal = $('wi-engine-lh-status');
+    var lhSub = $('wi-engine-lh-detail');
+    if (lhVal) {
+      if (st.lighthouse) {
+        lhVal.textContent = 'Available';
+        lhVal.style.color = 'var(--green)';
+      } else {
+        lhVal.textContent = 'Unavailable (Safe)';
+        lhVal.style.color = 'var(--text2)';
+      }
+    }
+    if (lhSub) {
+      lhSub.textContent = st.lighthouse ? 'Lighthouse CLI ready in system PATH' : 'No synthetic scores fabricated';
+    }
+  });
 }
 
 /* ═══════════════════════════════════════════════════════════
