@@ -12,6 +12,26 @@ Dokumen ini berisi panduan lengkap untuk melakukan instalasi, konfigurasi, penge
 
 ---
 
+## 0. Menyiapkan Berkas Konfigurasi
+
+Repositori **tidak** menyertakan `config.json` (berisi kredensial). Yang tersedia adalah
+template `config.example.json`. Salin dulu sebelum menjalankan:
+
+```bash
+cp config.example.json config.json
+```
+
+Template ini sudah berisi upstream DNS default (`1.1.1.1`, `8.8.8.8`, `9.9.9.9`) tetapi
+kolom admin dikosongkan (`admin_username`, `admin_password_hash`, `session_secret` = `""`),
+sehingga server masuk **mode setup** — Anda membuat akun admin sendiri lewat dashboard saat
+pertama kali jalan (lihat **Bagian 6**). Ubah upstream, blocklist, atau port sesuai
+kebutuhan sebelum start bila perlu.
+
+> Jika `config.json` belum ada saat server dijalankan, VortexDNS otomatis men-generate
+> config default (efeknya sama dengan menyalin template di atas).
+
+---
+
 ## 1. Metode Instalasi Otomatis (Direkomendasikan)
 
 VortexDNS menyediakan skrip instalasi premium yang mendeteksi arsitektur CPU Anda, mengunduh kompiler Go (jika belum ada), membangun binary, mengonfigurasi direktori, dan memasang layanan `systemd`.
@@ -202,6 +222,7 @@ Repositori menyertakan `Dockerfile` (multi-stage, image akhir Alpine) dan `docke
 ### Docker Compose (paling ringkas)
 ```bash
 cd /path/ke/vortexdns
+cp config.example.json config.json   # lewati jika sudah ada
 docker compose up -d --build
 ```
 Port default yang dipetakan: `10053->53` (DNS) dan `18080->8080` (dashboard). `config.json`,
