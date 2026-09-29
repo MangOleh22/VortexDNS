@@ -17,5 +17,9 @@ vortex_db/scans/*
 !vortex_db/scans/.gitkeep
 vortex_db/reports/*
 !vortex_db/reports/.gitkeep
+# SQLite database (query log, akun, audit — data runtime & privasi)
+vortex_db/vortex.db
+vortex_db/vortex.db-wal
+vortex_db/vortex.db-shm
 *.log
 

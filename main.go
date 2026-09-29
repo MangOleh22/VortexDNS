@@ -22,6 +22,7 @@ import (
 	"vortexdns/dashboard"
 	"vortexdns/dns"
 	"vortexdns/forwarder"
+	"vortexdns/storage"
 )
 
 func main() {
@@ -66,6 +67,14 @@ func main() {
 	log.Printf("[Main] Config loaded successfully from %s", *configPath)
 	log.Printf("[Main] Configured Upstreams: %v", cfg.UpstreamServers)
 
+	// 1.5. Open SQLite storage
+	log.Println("[Main] Opening SQLite storage...")
+	store, err := storage.Open(cfg.DatabaseDir)
+	if err != nil {
+		log.Fatalf("[Main] Failed to open storage: %v", err)
+	}
+	defer store.Close()
+
 	// 2. Initialize Core components
 	log.Println("[Main] Initializing high-performance lock-free Blocker...")
 	adBlocker := blocker.New(cfg)
@@ -84,7 +93,7 @@ func main() {
 	dnsServer := dns.NewServer(cfg, adBlocker, dnsCache, dnsForwarder)
 
 	log.Println("[Main] Preparing Glassmorphic Dashboard and REST endpoints...")
-	dashboardServer := dashboard.New(cfg, dnsServer, adBlocker, adUpdater, dnsCache, dnsForwarder)
+	dashboardServer := dashboard.New(cfg, dnsServer, adBlocker, adUpdater, dnsCache, dnsForwarder, store)
 
 	// 4. Start servers
 	if err := dnsServer.Start(); err != nil {

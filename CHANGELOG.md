@@ -6,9 +6,21 @@ Semua perubahan yang tercatat di branch `development`.
 
 ## [Unreleased] — Rencana
 
-- **Migrasi storage → SQLite** — query log, akun, blocklist metadata, audit log, stats historis
-  akan dipindah dari file JSON/flat ke SQLite embedded (WAL mode). Rencana detail di
-  `rencana_sqlite.md`. Belum dieksekusi.
+- **Migrasi storage SQLite (lanjutan)** — Fase 3-5: query log, stats historis, akun &
+  blocklist metadata akan menyusul dipindah ke SQLite. Rencana detail di `rencana_sqlite.md`.
+
+---
+
+## 2026-09-29
+
+### Fitur Baru — Storage SQLite (Fase 1-2)
+- **Package `storage/`** — Fondasi SQLite embedded (WAL mode) via `modernc.org/sqlite`
+  (pure-Go, tanpa CGO). File tunggal `vortex_db/vortex.db`. Tabel: `query_log`,
+  `audit_log`, `stats_hourly` (semua terindeks).
+- **Audit log persisten** — Sebelumnya in-memory (hilang saat restart). Sekarang ditulis
+  ke SQLite via `recordAudit()`, dibaca `/api/audit` dari DB. Bertahan antar-restart.
+- **WAL mode** — Baca & tulis konkuren tanpa blocking, crash-safe (seperti Pi-hole).
+- Unit test `storage_test.go` — verifikasi open, create tabel, insert/select. PASS.
 
 ---
 

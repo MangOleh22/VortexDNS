@@ -30,6 +30,7 @@ import (
 	"vortexdns/config"
 	"vortexdns/dns"
 	"vortexdns/forwarder"
+	"vortexdns/storage"
 	"vortexdns/scanner"
 )
 
@@ -54,7 +55,10 @@ type DashboardServer struct {
 	// Server start time, used for real uptime reporting
 	startTime time.Time
 
-	// In-memory audit trail (newest first, capped)
+	// SQLite persistent storage
+	store *storage.DB
+
+	// In-memory audit trail (newest first, capped) — kept as fallback/cache
 	auditLog []AuditEntry
 	auditMu  sync.Mutex
 }
@@ -71,6 +75,11 @@ type AuditEntry struct {
 // recordAudit prepends an audit entry, keeping only the newest 200.
 func (ds *DashboardServer) recordAudit(r *http.Request, event, detail string, ok bool) {
 	ip := clientIPOf(r)
+	// Persist to SQLite
+	if ds.store != nil {
+		ds.store.InsertAudit(event, detail, ip, ok)
+	}
+	// Keep in-memory copy for backward compat
 	ds.auditMu.Lock()
 	defer ds.auditMu.Unlock()
 	ds.auditLog = append([]AuditEntry{{
@@ -98,7 +107,7 @@ func clientIPOf(r *http.Request) string {
 }
 
 // New creates a new DashboardServer instance
-func New(cfg *config.Config, s *dns.DNSServer, b *blocker.Blocker, u *blocker.BlockerUpdater, c *cache.DNSCache, f *forwarder.SmartForwarder) *DashboardServer {
+func New(cfg *config.Config, s *dns.DNSServer, b *blocker.Blocker, u *blocker.BlockerUpdater, c *cache.DNSCache, f *forwarder.SmartForwarder, store *storage.DB) *DashboardServer {
 	ds := &DashboardServer{
 		cfg:           cfg,
 		server:        s,
@@ -110,6 +119,7 @@ func New(cfg *config.Config, s *dns.DNSServer, b *blocker.Blocker, u *blocker.Bl
 		mux:           http.NewServeMux(),
 		sessionTokens: make(map[string]time.Time),
 		startTime:     time.Now(),
+		store:         store,
 	}
 
 	ds.registerRoutes()
@@ -1749,6 +1759,15 @@ func (ds *DashboardServer) handleZoneRecords(w http.ResponseWriter, r *http.Requ
 func (ds *DashboardServer) handleAudit(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+	// Read from SQLite if available, fallback to in-memory
+	if ds.store != nil {
+		entries := ds.store.RecentAudits(200)
+		if entries == nil {
+			entries = []storage.AuditEntry{}
+		}
+		writeJSON(w, http.StatusOK, entries)
 		return
 	}
 	ds.auditMu.Lock()
