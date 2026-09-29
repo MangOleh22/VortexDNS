@@ -63,4 +63,32 @@ func TestOpenAndCreateTables(t *testing.T) {
 	if stats[0].TotalQueries != 2 {
 		t.Fatalf("expected 2 total queries, got %d", stats[0].TotalQueries)
 	}
+
+	// Accounts
+	if n := db.AccountCount(); n != 0 {
+		t.Fatalf("expected 0 accounts, got %d", n)
+	}
+	if err := db.UpsertAccount("admin", "hash123"); err != nil {
+		t.Fatalf("UpsertAccount failed: %v", err)
+	}
+	if n := db.AccountCount(); n != 1 {
+		t.Fatalf("expected 1 account, got %d", n)
+	}
+	acc := db.GetAccount("admin")
+	if acc == nil || acc.PasswordHash != "hash123" {
+		t.Fatalf("GetAccount failed: %+v", acc)
+	}
+	// Update existing (no duplicate)
+	if err := db.UpsertAccount("admin", "newhash"); err != nil {
+		t.Fatalf("update failed: %v", err)
+	}
+	if n := db.AccountCount(); n != 1 {
+		t.Fatalf("expected still 1 account after update, got %d", n)
+	}
+	if db.GetAccount("admin").PasswordHash != "newhash" {
+		t.Fatalf("password not updated")
+	}
+	if db.GetAccount("ghost") != nil {
+		t.Fatalf("expected nil for missing account")
+	}
 }

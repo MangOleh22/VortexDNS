@@ -122,6 +122,16 @@ func New(cfg *config.Config, s *dns.DNSServer, b *blocker.Blocker, u *blocker.Bl
 		store:         store,
 	}
 
+	// One-time migration: if config.json still holds the admin but the accounts
+	// table is empty, seed it so login/setup can read from SQLite going forward.
+	if store != nil && cfg.AdminUsername != "" && cfg.AdminPasswordHash != "" && store.AccountCount() == 0 {
+		if err := store.UpsertAccount(cfg.AdminUsername, cfg.AdminPasswordHash); err != nil {
+			log.Printf("[Dashboard] account migration warning: %v", err)
+		} else {
+			log.Printf("[Dashboard] migrated admin account %q to SQLite", cfg.AdminUsername)
+		}
+	}
+
 	ds.registerRoutes()
 	return ds
 }
@@ -383,6 +393,9 @@ func (ds *DashboardServer) handleAuthStatus(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	needsSetup := ds.cfg.AdminPasswordHash == ""
+	if ds.store != nil && ds.store.AccountCount() > 0 {
+		needsSetup = false
+	}
 	isLoggedIn := ds.isValidRequestSession(r)
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
@@ -400,7 +413,11 @@ func (ds *DashboardServer) handleAuthSetup(w http.ResponseWriter, r *http.Reques
 	ds.sessionMu.Lock()
 	defer ds.sessionMu.Unlock()
 
-	if ds.cfg.AdminPasswordHash != "" {
+	alreadySetup := ds.cfg.AdminPasswordHash != ""
+	if ds.store != nil && ds.store.AccountCount() > 0 {
+		alreadySetup = true
+	}
+	if alreadySetup {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "already setup"})
 		return
 	}
@@ -427,6 +444,13 @@ func (ds *DashboardServer) handleAuthSetup(w http.ResponseWriter, r *http.Reques
 
 	ds.cfg.AdminUsername = req.Username
 	ds.cfg.AdminPasswordHash = string(hash)
+	// Persist to SQLite (source of truth) and mirror to config.json.
+	if ds.store != nil {
+		if err := ds.store.UpsertAccount(req.Username, string(hash)); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to save account"})
+			return
+		}
+	}
 	config.Save("config.json", ds.cfg)
 
 	ds.recordAudit(r, "config", "Setup admin awal — "+req.Username, true)
@@ -453,13 +477,24 @@ func (ds *DashboardServer) handleAuthLogin(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	if req.Username != ds.cfg.AdminUsername {
+	// Resolve credentials: prefer SQLite accounts, fall back to config.json.
+	var wantUser, wantHash string
+	if ds.store != nil {
+		if acc := ds.store.GetAccount(req.Username); acc != nil {
+			wantUser, wantHash = acc.Username, acc.PasswordHash
+		}
+	}
+	if wantHash == "" {
+		wantUser, wantHash = ds.cfg.AdminUsername, ds.cfg.AdminPasswordHash
+	}
+
+	if req.Username != wantUser {
 		ds.recordAudit(r, "login", "Login gagal — username: "+req.Username, false)
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid credentials"})
 		return
 	}
 
-	if err := bcrypt.CompareHashAndPassword([]byte(ds.cfg.AdminPasswordHash), []byte(req.Password)); err != nil {
+	if err := bcrypt.CompareHashAndPassword([]byte(wantHash), []byte(req.Password)); err != nil {
 		ds.recordAudit(r, "login", "Login gagal — username: "+req.Username, false)
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid credentials"})
 		return

@@ -88,7 +88,24 @@ CREATE TABLE IF NOT EXISTS stats_hourly (
     unique_clients INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_stats_hour ON stats_hourly(hour);
+
+CREATE TABLE IF NOT EXISTS accounts (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    username      TEXT    NOT NULL UNIQUE,
+    password_hash TEXT    NOT NULL,
+    created_at    TEXT    NOT NULL,
+    updated_at    TEXT    NOT NULL
+);
 `
+
+// Account mirrors the accounts table.
+type Account struct {
+	ID           int64  `db:"id"`
+	Username     string `db:"username"`
+	PasswordHash string `db:"password_hash"`
+	CreatedAt    string `db:"created_at"`
+	UpdatedAt    string `db:"updated_at"`
+}
 
 // Open creates (or opens) the SQLite database at dbDir/vortex.db with WAL mode.
 func Open(dbDir string) (*DB, error) {
@@ -240,6 +257,40 @@ func (s *DB) PruneStats(retention time.Duration) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.db.Exec(`DELETE FROM stats_hourly WHERE hour < ?`, cutoff)
+}
+
+// ── Accounts ────────────────────────────────────────────────────────────────
+
+// AccountCount returns number of admin accounts.
+func (s *DB) AccountCount() int64 {
+	var n int64
+	s.db.Get(&n, `SELECT COUNT(*) FROM accounts`)
+	return n
+}
+
+// GetAccount returns the account for a username, or nil if not found.
+func (s *DB) GetAccount(username string) *Account {
+	var a Account
+	err := s.db.Get(&a, `SELECT id, username, password_hash, created_at, updated_at FROM accounts WHERE username = ?`, username)
+	if err != nil {
+		return nil
+	}
+	return &a
+}
+
+// UpsertAccount creates or updates an admin account by username.
+func (s *DB) UpsertAccount(username, passwordHash string) error {
+	now := time.Now().Format("2006-01-02 15:04:05")
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := s.db.Exec(`
+		INSERT INTO accounts (username, password_hash, created_at, updated_at)
+		VALUES (?, ?, ?, ?)
+		ON CONFLICT(username) DO UPDATE SET
+			password_hash = excluded.password_hash,
+			updated_at    = excluded.updated_at
+	`, username, passwordHash, now, now)
+	return err
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────

@@ -6,21 +6,28 @@ Semua perubahan yang tercatat di branch `development`.
 
 ## [Unreleased] — Rencana
 
-- **Migrasi storage SQLite (lanjutan)** — Fase 3-5: query log, stats historis, akun &
-  blocklist metadata akan menyusul dipindah ke SQLite. Rencana detail di `rencana_sqlite.md`.
+- **Migrasi API dashboard ke Rust** — Opsi arsitektur & trade-off didokumentasikan di
+  `rencana_migrasi_rust.md`. Belum diputuskan/dieksekusi.
 
 ---
 
 ## 2026-09-29
 
-### Fitur Baru — Storage SQLite (Fase 1-2)
-- **Package `storage/`** — Fondasi SQLite embedded (WAL mode) via `modernc.org/sqlite`
-  (pure-Go, tanpa CGO). File tunggal `vortex_db/vortex.db`. Tabel: `query_log`,
-  `audit_log`, `stats_hourly` (semua terindeks).
-- **Audit log persisten** — Sebelumnya in-memory (hilang saat restart). Sekarang ditulis
-  ke SQLite via `recordAudit()`, dibaca `/api/audit` dari DB. Bertahan antar-restart.
+### Fitur Baru — Storage SQLite (Fase 1-5, LENGKAP)
+- **Package `storage/`** — SQLite embedded (WAL mode) via `modernc.org/sqlite`
+  (pure-Go, tanpa CGO). File tunggal `vortex_db/vortex.db`. Tabel terindeks:
+  `query_log`, `audit_log`, `stats_hourly`, `accounts`.
+- **Query log → SQLite** — Tiap query DNS di-mirror ke tabel `query_log` via query hook
+  di `advanced.WriteAccessLog` (`SetQueryHook`). access.log file tetap ditulis (backward compat).
+- **Stats per-jam → SQLite** — `stats_hourly` di-upsert tiap query (total, blocked,
+  avg latency, unique clients). Bertahan antar-restart.
+- **Akun admin → SQLite** — Login & setup memakai tabel `accounts` (source of truth),
+  di-mirror ke config.json. Migrasi otomatis akun lama dari config.json saat pertama jalan.
+  `-reset-password` juga sinkron ke SQLite.
+- **Audit log persisten** — Ditulis ke SQLite via `recordAudit()`, `/api/audit` baca dari DB.
+- **Auto-prune** — Query log & stats di-prune per jam sesuai `stats_retention_hours` (default 24).
 - **WAL mode** — Baca & tulis konkuren tanpa blocking, crash-safe (seperti Pi-hole).
-- Unit test `storage_test.go` — verifikasi open, create tabel, insert/select. PASS.
+- Unit test `storage_test.go` — open, tabel, insert/select query+audit+stats+accounts. PASS.
 
 ---
 

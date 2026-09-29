@@ -126,6 +126,19 @@ type AdvancedEngine struct {
 	dohServer *http.Server
 	dotServer *dns.Server
 	doqLn     *quic.Listener
+
+	// queryHook, when set, is called for every logged query so an external
+	// store (SQLite) can persist it. Optional; nil means file-only logging.
+	// Kept as a func to avoid importing the storage package here (import cycle).
+	queryHook   func(domain, qType, clientIP, status string, elapsedMs int64, blocked bool)
+	queryHookMu sync.RWMutex
+}
+
+// SetQueryHook registers a callback invoked on every WriteAccessLog call.
+func (ae *AdvancedEngine) SetQueryHook(fn func(domain, qType, clientIP, status string, elapsedMs int64, blocked bool)) {
+	ae.queryHookMu.Lock()
+	ae.queryHook = fn
+	ae.queryHookMu.Unlock()
 }
 
 var Instance *AdvancedEngine
@@ -755,6 +768,15 @@ func (ae *AdvancedEngine) WriteAccessLog(domain, qType, clientIP, status string,
 		return
 	}
 	ae.accessBytes += int64(n)
+
+	// Mirror to external store (SQLite) if a hook is registered.
+	ae.queryHookMu.RLock()
+	hook := ae.queryHook
+	ae.queryHookMu.RUnlock()
+	if hook != nil {
+		blocked := strings.HasPrefix(status, "Blocked")
+		hook(strings.TrimSuffix(domain, "."), qType, clientIP, status, elapsedMs, blocked)
+	}
 }
 
 // rotateAccessLogLocked shifts access.log to access.log.1, ageing the existing

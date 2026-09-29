@@ -92,6 +92,20 @@ func main() {
 	log.Println("[Main] Assembling DNS query processing pipeline...")
 	dnsServer := dns.NewServer(cfg, adBlocker, dnsCache, dnsForwarder)
 
+	// Persist every query + hourly stats to SQLite (mirrors file access.log).
+	dnsServer.Advanced().SetQueryHook(func(domain, qType, clientIP, status string, elapsedMs int64, blocked bool) {
+		store.InsertQuery(storage.QueryLogEntry{
+			Timestamp: time.Now().Format("2006-01-02 15:04:05"),
+			ClientIP:  clientIP,
+			Domain:    domain,
+			QType:     qType,
+			Rcode:     status,
+			Blocked:   blocked,
+			LatencyMs: float64(elapsedMs),
+		})
+		store.UpsertStatsHourly(blocked, float64(elapsedMs), clientIP)
+	})
+
 	log.Println("[Main] Preparing Glassmorphic Dashboard and REST endpoints...")
 	dashboardServer := dashboard.New(cfg, dnsServer, adBlocker, adUpdater, dnsCache, dnsForwarder, store)
 
@@ -104,6 +118,21 @@ func main() {
 	dnsServer.Advanced().SetupTransparentProxy(cfg.BindAddress)
 
 	dashboardServer.Start()
+
+	// 4.6 Periodic pruning of SQLite query log + stats based on retention.
+	go func() {
+		retentionHours := cfg.StatsRetentionHours
+		if retentionHours <= 0 {
+			retentionHours = 24
+		}
+		retention := time.Duration(retentionHours) * time.Hour
+		ticker := time.NewTicker(1 * time.Hour)
+		defer ticker.Stop()
+		for range ticker.C {
+			store.PruneQueryLog(retention)
+			store.PruneStats(retention)
+		}
+	}()
 
 	// 5. Smart Bootstrapping: If database has 0 rules, trigger a sync in the background automatically
 	go func() {
@@ -184,6 +213,18 @@ func resetAdminCredentials(configPath, newUsername string) error {
 
 	if err := config.Save(configPath, cfg); err != nil {
 		return fmt.Errorf("saving config %q: %w", configPath, err)
+	}
+
+	// Keep SQLite accounts table in sync so the dashboard (which prefers SQLite)
+	// authenticates with the new credential. Best-effort: config.json remains
+	// the guaranteed source, so a storage error here is logged, not fatal.
+	if store, serr := storage.Open(cfg.DatabaseDir); serr == nil {
+		if uerr := store.UpsertAccount(cfg.AdminUsername, string(hash)); uerr != nil {
+			log.Printf("[Reset] warning: failed to update SQLite account: %v", uerr)
+		}
+		store.Close()
+	} else {
+		log.Printf("[Reset] warning: could not open storage to sync account: %v", serr)
 	}
 
 	log.Printf("[Reset] Admin credentials updated for user %q (password from %s). Restart VortexDNS to apply.", cfg.AdminUsername, source)
