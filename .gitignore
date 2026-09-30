@@ -19,3 +19,4 @@ vortex_db/vortex.db-wal
 vortex_db/vortex.db-shm
 *.log
 
+docs/SECURITY_AUDIT.md
