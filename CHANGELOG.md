@@ -13,6 +13,21 @@ Semua perubahan yang tercatat di branch `development`.
 
 ## 2026-09-30
 
+### Dihapus — Fitur Scanner & AI Detection (di luar konteks)
+- **Package `scanner/` dihapus total** — Website Intelligence & URL Scanner, AI stack
+  detection, Lighthouse, TLS/tech/secret scanning, report engine (PDF/JSON/CSV/JSONL).
+  Di luar konteks kebutuhan DNS server.
+- **Dashboard**: hapus field `scannerMgr`, semua route `/api/v1/scans*`, handler scanner,
+  metrik scanner Prometheus, import `vortexdns/scanner` + `path/filepath` yang tak terpakai.
+- **Web UI**: hapus halaman "Website Intelligence" (nav, page, tab, view) di index.html
+  dan seluruh logika `wiState`/scanner di app.js (~960 baris).
+- **Docs**: hapus `SCANNER_SECURITY.md`, `AI_DETECTION.md`, `PRODUCT_QUALITY_SCORECARD.md`,
+  `WEB_INTELLIGENCE_ARCHITECTURE.md`, `SCAN_SCHEMA.md`, `OBSERVABILITY_ARCHITECTURE.md`.
+- **OpenAPI**: hapus semua path `/api/v1/scans*` dan skema Scan/ScanReport/Lighthouse/dll
+  (docs + web).
+- **Cleanup**: hapus dir `vortex_db/scans`, `vortex_db/reports` + aturan `.gitignore` terkait.
+- Build + `go vet` + `go test` bersih; endpoint scanner kini 404; DNS & dashboard tetap jalan.
+
 ### Perbaikan Bug (dari testing)
 - **Blocklist lokal tak ter-load** — Path relatif seperti `vortex_db/lists/…` dikira URL
   remote (gagal download). Ditambah `isLocalPath()`: apa pun yang bukan `http(s)://`

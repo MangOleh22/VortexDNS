@@ -25,7 +25,7 @@ Tidak ada temuan kritis (tidak ada RCE, tidak ada auth bypass, tidak ada kebocor
 | 7 | 🔴 Sedang | web/auth | Token sesi bocor memori (tidak ada cleanup periodik) |
 | 8 | 🔴 Sedang | web | Tombol restart mati di Docker (`systemctl` tak ada) |
 | 10 | 🟡 Rendah | web | Config GET membocorkan `admin_password_hash` + `session_secret` ke frontend |
-| 4 | 🟡 Rendah | scanner | `go vet`: format `%s:%d` salah untuk alamat IPv6 |
+| 4 | ~~scanner~~ | ~~`go vet`: format IPv6~~ — **tidak berlaku, package scanner dihapus** |
 | 5 | 🟡 Rendah | web/config | Path `config.json` di-hardcode (11 lokasi), abaikan flag `-config` |
 | 9 | 🟡 Rendah | web/auth | Endpoint setup tanpa rate-limit / proteksi race |
 | 6 | 🟡 Rendah | semua | Sebagian file belum `gofmt` |
