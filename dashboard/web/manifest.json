@@ -1,0 +1,41 @@
+{
+  "name": "VortexDNS — Pemblokir Iklan DNS",
+  "short_name": "VortexDNS",
+  "description": "Server DNS berkinerja tinggi dengan pemblokiran iklan real-time dan dashboard monitoring premium.",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0d1426",
+  "theme_color": "#00f0ff",
+  "lang": "id",
+  "scope": "/",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["utilities", "productivity"],
+  "shortcuts": [
+    {
+      "name": "Ringkasan",
+      "short_name": "Ringkasan",
+      "description": "Lihat statistik DNS real-time",
+      "url": "/#overview"
+    },
+    {
+      "name": "Log Kueri",
+      "short_name": "Log",
+      "description": "Monitor lalu lintas DNS langsung",
+      "url": "/#logs"
+    }
+  ]
+}

@@ -1,0 +1,1143 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<meta name="description" content="VortexDNS Management Dashboard"/>
+<title>VortexDNS — Dashboard</title>
+<!-- PWA -->
+<link rel="manifest" href="manifest.json"/>
+<meta name="theme-color" content="#00f0ff"/>
+<meta name="mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+<meta name="apple-mobile-web-app-title" content="VortexDNS"/>
+<link rel="apple-touch-icon" href="icon-192.png"/>
+<link rel="icon" type="image/png" href="icon-192.png"/>
+<link rel="stylesheet" href="style.css"/>
+</head>
+<body>
+
+<!-- ══════════════════════════════════════════════════════════
+     LOGIN PAGE
+══════════════════════════════════════════════════════════ -->
+<div id="login-view">
+  <div class="login-bg-glow"></div>
+  <div class="login-grid"></div>
+  <div class="login-scan"></div>
+  <div class="l-particles" id="l-particles"></div>
+
+  <div class="login-box">
+    <!-- Brand -->
+    <div class="login-brand">
+      <div class="login-logo-wrap">
+        <img src="icon-192.png" class="login-logo-img" alt="VortexDNS"/>
+      </div>
+      <div class="login-brand-name">VortexDNS</div>
+      <div class="login-brand-sub">DNS Management Dashboard · Restricted Access</div>
+    </div>
+
+    <div class="login-card">
+      <!-- Error box -->
+      <div class="l-err" id="l-err"><span>✕</span><span id="l-err-msg">Username atau password salah.</span></div>
+
+      <!-- Login form -->
+      <div id="l-form">
+        <div class="l-field">
+          <label class="l-label" for="l-user">Username</label>
+          <div class="l-wrap">
+            <span class="l-icon">◷</span>
+            <input type="text" class="l-inp" id="l-user" placeholder="admin" autocomplete="username" autofocus/>
+          </div>
+        </div>
+        <div class="l-field">
+          <label class="l-label" for="l-pass">Password</label>
+          <div class="l-wrap">
+            <span class="l-icon">⚿</span>
+            <input type="password" class="l-inp" id="l-pass" placeholder="••••••••" autocomplete="current-password"/>
+            <button class="l-eye" id="l-eye" onclick="toggleLoginPw()" aria-label="Toggle password visibility"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>
+          </div>
+        </div>
+
+        <div class="l-extras">
+          <div class="l-remember" onclick="toggleLoginRemember()">
+            <div class="l-chk on" id="l-chk">✓</div>
+            <span class="l-chk-label">Remember me</span>
+          </div>
+          <button class="l-link">Lupa password?</button>
+        </div>
+
+        <button class="l-btn" id="l-btn" onclick="doLogin()">Masuk ke Dashboard →</button>
+
+        <div class="l-pips" id="l-pips" style="display:none">
+          <div class="l-pip" id="lp0"></div>
+          <div class="l-pip" id="lp1"></div>
+          <div class="l-pip" id="lp2"></div>
+        </div>
+      </div>
+
+      <!-- First-run setup form (shown when backend has no admin configured) -->
+      <div id="l-setup" style="display:none">
+        <div class="l-field">
+          <label class="l-label" for="s-user">Buat Username Admin</label>
+          <div class="l-wrap">
+            <span class="l-icon">◷</span>
+            <input type="text" class="l-inp" id="s-user" placeholder="admin" autocomplete="username" minlength="3"/>
+          </div>
+        </div>
+        <div class="l-field">
+          <label class="l-label" for="s-pass">Buat Password (min. 6 karakter)</label>
+          <div class="l-wrap">
+            <span class="l-icon">⚿</span>
+            <input type="password" class="l-inp" id="s-pass" placeholder="••••••••" autocomplete="new-password" minlength="6"/>
+          </div>
+        </div>
+        <div class="l-field">
+          <label class="l-label" for="s-pass2">Ulangi Password</label>
+          <div class="l-wrap">
+            <span class="l-icon">⚿</span>
+            <input type="password" class="l-inp" id="s-pass2" placeholder="••••••••" autocomplete="new-password"/>
+          </div>
+        </div>
+        <button class="l-btn" id="s-btn" onclick="doSetup()">Buat Akun & Mulai →</button>
+      </div>
+
+      <!-- Success state -->
+      <div class="login-success" id="l-success">
+        <span class="ls-icon">✓</span>
+        <div class="ls-ok-title">Login Berhasil</div>
+        <div class="ls-ok-sub" id="l-welcome">Selamat datang, admin</div>
+        <div class="ls-progress">
+          <div class="ls-prog-track"><div class="ls-prog-fill" id="l-prog"></div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="login-footer">
+      <span style="color:var(--text3)">DNS · DoH · DoT · DoQ · Recursive · DNSSEC</span><br/>
+      <div style="display:inline-flex; align-items:center; gap:6px; margin-top:8px;">
+        <div class="live-dot"></div><span style="color:var(--green);font-size:11px;">DNS Server Live</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── TOPBAR ────────────────────────────────────────────── -->
+<div class="topbar">
+  <div class="topbar-brand">
+    <img src="icon-192.png" class="topbar-logo" alt="VortexDNS"/>
+    <span class="topbar-name">VortexDNS</span>
+    <span class="topbar-version">v1.0.0</span>
+  </div>
+
+  <div class="topbar-center">
+    
+    
+  </div>
+
+  <div class="topbar-right">
+    <button class="topbar-btn" onclick="flushCache()">⚡ Flush Cache</button>
+    <button class="topbar-btn danger" onclick="restartDNS()">↺ Restart</button>
+    <div class="t-user" id="t-user-btn" onclick="doLogout()">
+      <div class="t-avatar" id="t-avatar">A</div>
+      <span class="t-uname" id="t-uname">admin</span>
+      <span style="color:var(--text3);font-size:10px">⎋</span>
+    </div>
+  </div>
+</div>
+
+<!-- ── LAYOUT ────────────────────────────────────────────── -->
+<div class="layout">
+
+  <!-- SIDEBAR -->
+  <nav class="sidebar" aria-label="Main Navigation">
+    <div class="nav-section">Overview</div>
+    <div class="nav-item active" data-page="dashboard"><span class="nav-icon">◉</span>Dashboard</div>
+    <div class="nav-item" data-page="logs"><span class="nav-icon">≡</span>Log</div>
+    <div class="nav-item" data-page="realtime"><span class="nav-icon">〜</span>Real-time</div>
+    <div class="nav-item" data-page="geo"><span class="nav-icon">🌍</span>Geo Routing</div>
+
+    <div class="nav-section">Protection</div>
+    <div class="nav-item" data-page="blocking"><span class="nav-icon">◈</span>Blocklist</div>
+    <div class="nav-item" data-page="whitelist"><span class="nav-icon">◎</span>Whitelist</div>
+    <div class="nav-item" data-page="customblock"><span class="nav-icon">⊗</span>Custom Block</div>
+    <div class="nav-item" data-page="services"><span class="nav-icon">▣</span>Blocked Services</div>
+    <div class="nav-item" data-page="schedule"><span class="nav-icon">◕</span>Schedule</div>
+
+    <div class="nav-section">DNS</div>
+    <div class="nav-item" data-page="upstream"><span class="nav-icon">↑</span>Upstream</div>
+    <div class="nav-item" data-page="zones"><span class="nav-icon">⬡</span>Auth Zones</div>
+    <div class="nav-item" data-page="cache"><span class="nav-icon">▦</span>Cache</div>
+    <div class="nav-item" data-page="dnssec"><span class="nav-icon">⚿</span>DNSSEC</div>
+
+    <div class="nav-section">Intelligence</div>
+    <div class="nav-item" data-page="webintel"><span class="nav-icon">🌐</span>Website Intelligence</div>
+
+    <div class="nav-section">Network</div>
+    <div class="nav-item" data-page="clients"><span class="nav-icon">◷</span>Clients</div>
+    <div class="nav-item" data-page="acl"><span class="nav-icon">🔒</span>ACL</div>
+
+
+
+    <div class="nav-section">System</div>
+    <div class="nav-item" data-page="metrics"><span class="nav-icon">📊</span>Prometheus</div>
+    <div class="nav-item" data-page="settings"><span class="nav-icon">⊞</span>Settings</div>
+
+    <div class="sidebar-footer">
+      
+      VortexDNS v1.0.0<br/>
+      <span id="sys-arch-sb">linux/amd64</span><br/>
+      Uptime: <span id="sb-uptime">—</span>
+    </div>
+  </nav>
+
+  <!-- MAIN -->
+  <main class="main" id="main">
+
+    <!-- ══════════ DASHBOARD ══════════ -->
+    <div id="page-dashboard" class="page">
+      <div class="page-head">
+        <div class="page-title">◉ Dashboard</div>
+        <div class="page-sub">overview real-time · vortexdns recursive resolver</div>
+      </div>
+
+      <!-- Row 1: 6 stat cards -->
+      <div class="g g6 mb12">
+        <div class="stat-card c-cyan">
+          <div class="sc-bg-icon">⬡</div>
+          <div class="sc-label">Total Queries</div>
+          <div class="sc-value c-cyan" id="s-queries">—</div>
+          <div class="sc-sub">hari ini</div>
+          <div class="sparkline" id="spark-q"></div>
+        </div>
+        <div class="stat-card c-red">
+          <div class="sc-bg-icon">◈</div>
+          <div class="sc-label">Blocked</div>
+          <div class="sc-value c-red" id="s-blocked">—</div>
+          <div class="sc-sub" id="s-block-pct">—% dari total</div>
+          <div class="sparkline" id="spark-b"></div>
+        </div>
+        <div class="stat-card c-green">
+          <div class="sc-bg-icon">▦</div>
+          <div class="sc-label">Cache Hits</div>
+          <div class="sc-value c-green" id="s-cached">—</div>
+          <div class="sc-sub" id="s-cache-pct">—% hit rate</div>
+          <div class="sparkline" id="spark-c"></div>
+        </div>
+        <div class="stat-card c-purple">
+          <div class="sc-bg-icon">⚡</div>
+          <div class="sc-label">Avg Latency</div>
+          <div class="sc-value c-purple" id="s-latency">—</div>
+          <div class="sc-sub">ms · p95: <span id="s-p95">—</span>ms</div>
+          <div class="sparkline" id="spark-l"></div>
+        </div>
+        <div class="stat-card c-blue">
+          <div class="sc-bg-icon">◷</div>
+          <div class="sc-label">Active Clients</div>
+          <div class="sc-value c-blue" id="s-clients">—</div>
+          <div class="sc-sub">unik hari ini</div>
+        </div>
+        <div class="stat-card c-grad">
+          <div class="sc-bg-icon">⚿</div>
+          <div class="sc-label">DNSSEC OK</div>
+          <div class="sc-value c-grad" id="s-dnssec">—</div>
+          <div class="sc-sub">validasi rate</div>
+        </div>
+      </div>
+
+      <!-- Row 2: status + top blocked + donut -->
+      <div class="g g3 mb12">
+        <div class="card">
+          <div class="card-title"><span class="ct-icon">◉</span>Status Layanan</div>
+          <div id="status-rows">
+            <div style="color:var(--text3);font-size:12px;padding:12px 0">Memuat status...</div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-title"><span class="ct-icon">◈</span>Top Blocked Domains</div>
+          <div id="top-blocked-bars">
+            <div style="color:var(--text3);font-size:12px;text-align:center;padding:20px 0">Memuat data...</div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-title"><span class="ct-icon">◎</span>Query Breakdown</div>
+          <div class="donut-wrap">
+            <svg width="100" height="100" viewBox="0 0 42 42" id="donut-svg">
+              <circle cx="21" cy="21" r="15.9" fill="none" stroke="var(--bg-raised)" stroke-width="4"/>
+              <circle id="donut-cached" cx="21" cy="21" r="15.9" fill="none" stroke="var(--green)"  stroke-width="4" stroke-dasharray="0 100" stroke-dashoffset="25" transform="rotate(-90 21 21)"/>
+              <circle id="donut-blocked" cx="21" cy="21" r="15.9" fill="none" stroke="var(--red)"    stroke-width="4" stroke-dasharray="0 100" stroke-dashoffset="0"  transform="rotate(-90 21 21)"/>
+              <circle id="donut-fwd"    cx="21" cy="21" r="15.9" fill="none" stroke="var(--blue)"   stroke-width="4" stroke-dasharray="0 100" stroke-dashoffset="0"  transform="rotate(-90 21 21)"/>
+              <text x="21" y="24" text-anchor="middle" font-size="5.5" font-family="JetBrains Mono" fill="var(--text3)">Total</text>
+            </svg>
+            <div class="donut-legend" style="flex:1">
+              <div class="legend-row"><span class="legend-dot" style="background:var(--green)"></span><span>Cache Hit</span><span class="legend-val" id="leg-cache">—%</span></div>
+              <div class="legend-row"><span class="legend-dot" style="background:var(--blue)"></span><span>Forwarded</span><span class="legend-val" id="leg-fwd">—%</span></div>
+              <div class="legend-row"><span class="legend-dot" style="background:var(--red)"></span><span>Blocked</span><span class="legend-val" id="leg-blocked">—%</span></div>
+            </div>
+          </div>
+          <hr class="divider"/>
+          <div class="card-title" style="margin-bottom:8px"><span class="ct-icon">⚑</span>Response Codes</div>
+          <div class="donut-legend" id="rcode-breakdown">
+            <div class="legend-row"><span class="legend-dot" style="background:var(--green)"></span><span>NOERROR</span><span class="legend-val" id="rc-noerror">—</span></div>
+            <div class="legend-row"><span class="legend-dot" style="background:var(--yellow)"></span><span>NXDOMAIN</span><span class="legend-val" id="rc-nxdomain">—</span></div>
+            <div class="legend-row"><span class="legend-dot" style="background:var(--purple)"></span><span>REFUSED</span><span class="legend-val" id="rc-refused">—</span></div>
+            <div class="legend-row"><span class="legend-dot" style="background:var(--red)"></span><span>SERVFAIL</span><span class="legend-val" id="rc-servfail">—</span></div>
+          </div>
+          <hr class="divider"/>
+          <div class="card-title" style="margin-bottom:8px"><span class="ct-icon">⬡</span>Protocol</div>
+          <div id="proto-bars"></div>
+        </div>
+      </div>
+
+      <!-- Row 3: recent queries + top clients -->
+      <div class="g g2">
+        <div class="card">
+          <div class="card-title"><span class="ct-icon">≡</span>Recent Queries</div>
+          <div style="overflow-x:auto">
+            <table class="tbl">
+              <thead><tr><th>Waktu</th><th>Domain</th><th>Tipe</th><th>Status</th><th>Latency</th></tr></thead>
+              <tbody id="dash-queries"></tbody>
+            </table>
+          </div>
+          <div style="margin-top:10px">
+            <button class="btn btn-ghost" style="font-size:11px" onclick="goPage('queries')">Lihat semua →</button>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-title"><span class="ct-icon">◷</span>Top Clients</div>
+          <div id="top-clients-bars"></div>
+          <hr class="divider"/>
+          <div class="card-title" style="margin-bottom:8px"><span class="ct-icon">◎</span>Top Allowed Domains</div>
+          <div id="top-allowed-bars"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══════════ QUERY LOG ══════════ -->
+    <div id="page-logs" class="page hidden">
+      <div class="page-head">
+        <div class="page-title">≡ Log</div>
+        <div class="page-sub">query DNS · audit admin · log proses server</div>
+      </div>
+      <div class="log-tabs" style="display:flex;gap:0;margin-bottom:16px;border-bottom:1px solid var(--border)">
+        <button class="log-tab active" data-logtab="query" onclick="switchLogTab('query')">Query</button>
+        <button class="log-tab" data-logtab="audit" onclick="switchLogTab('audit')">Audit</button>
+        <button class="log-tab" data-logtab="system" onclick="switchLogTab('system')">System</button>
+      </div>
+      <!-- QUERY TAB -->
+      <div id="logtab-query" class="logtab-panel">
+        <div class="toolbar">
+          <input type="text" class="inp" placeholder="Filter domain..." id="q-filter" oninput="filterQueries()" style="max-width:260px"/>
+          <select class="inp" style="max-width:110px" id="q-status" onchange="filterQueries()">
+            <option value="">Semua</option><option>OK</option><option>Block</option><option>Cache</option>
+          </select>
+          <select class="inp" style="max-width:90px" id="q-type" onchange="filterQueries()">
+            <option value="">Tipe</option><option>A</option><option>AAAA</option><option>CNAME</option><option>MX</option><option>TXT</option>
+          </select>
+          <button class="btn btn-ghost" onclick="loadQueryLog()">↺ Refresh</button>
+          <button class="btn btn-cyan" onclick="toggleQAuto()" id="btn-qauto">⏸ Pause Auto</button>
+        </div>
+        <div class="card">
+          <table class="tbl">
+            <thead><tr><th>Waktu</th><th>Domain</th><th>Client</th><th>Tipe</th><th>Status</th><th>Upstream</th><th>Latency</th><th>DNSSEC</th></tr></thead>
+            <tbody id="query-log-body"></tbody>
+          </table>
+        </div>
+      </div>
+      <!-- AUDIT TAB -->
+      <div id="logtab-audit" class="logtab-panel" style="display:none">
+        <div class="toolbar mb12">
+          <input type="text" class="inp" placeholder="Filter event..." style="max-width:240px" id="audit-filter" oninput="renderAuditLog()"/>
+          <select class="inp" style="max-width:110px" id="audit-event" onchange="renderAuditLog()">
+            <option value="">Semua</option><option>login</option><option>logout</option><option>config</option><option>block</option>
+          </select>
+          <button class="btn btn-ghost" onclick="loadAuditLog()">↺ Refresh</button>
+        </div>
+        <div class="card">
+          <div class="audit-row" style="font-size:10px;font-weight:600;color:var(--text3);font-family:var(--font-mono);border-bottom:1px solid var(--border)">
+            <span>WAKTU</span><span>EVENT</span><span>DETAIL</span><span>IP</span><span>STATUS</span>
+          </div>
+          <div id="audit-body"></div>
+        </div>
+      </div>
+      <!-- SYSTEM TAB -->
+      <div id="logtab-system" class="logtab-panel" style="display:none">
+        <div class="toolbar mb12">
+          <input type="text" class="inp" placeholder="Filter log..." style="max-width:240px" id="log-filter" oninput="renderSyslog()"/>
+          <select class="inp" style="max-width:110px" id="log-level" onchange="renderSyslog()">
+            <option value="">Semua</option><option>INFO</option><option>WARN</option><option>ERROR</option>
+          </select>
+          <button class="btn btn-ghost" onclick="refreshSyslog()">↺ Refresh</button>
+        </div>
+        <div class="card">
+          <div class="code-block" id="syslog-body" style="max-height:500px;overflow-y:auto;line-height:1.9;font-size:11px"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══════════ REALTIME ══════════ -->
+    <div id="page-realtime" class="page hidden">
+      <div class="page-head">
+        <div class="page-title">〜 Real-time Monitor</div>
+        <div class="page-sub">live DNS traffic · SSE stream · update 1 detik</div>
+      </div>
+      <div class="g g4 mb12">
+        <div class="stat-card c-cyan"><div class="sc-label">QPS</div><div class="sc-value c-cyan" id="rt-qps">0</div><div class="sc-sub">queries/detik</div></div>
+        <div class="stat-card c-red"><div class="sc-label">Block/s</div><div class="sc-value c-red" id="rt-bps">0</div><div class="sc-sub">blocked/detik</div></div>
+        <div class="stat-card c-green"><div class="sc-label">Cache/s</div><div class="sc-value c-green" id="rt-cps">0</div><div class="sc-sub">cache/detik</div></div>
+        <div class="stat-card c-purple"><div class="sc-label">Latency</div><div class="sc-value c-purple" id="rt-lat">0</div><div class="sc-sub">ms avg live</div></div>
+      </div>
+      <div class="card mb12">
+        <div class="card-title"><span class="ct-icon">〜</span>Traffic 60 Detik Terakhir</div>
+        <canvas id="rt-chart" height="80" style="width:100%;"></canvas>
+        <div style="display:flex;gap:16px;margin-top:8px;font-size:10px;font-family:var(--font-mono)">
+          <span style="color:var(--cyan)">— Queries</span>
+          <span style="color:var(--red)">— Blocked</span>
+          <span style="color:var(--green)">— Cache</span>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title"><span class="ct-icon">≡</span>Live Query Stream <span class="pill cyan" style="margin-left:6px">SSE</span></div>
+        <div id="rt-stream-body"></div>
+      </div>
+    </div>
+
+    <!-- ══════════ GEO ROUTING ══════════ -->
+    <div id="page-geo" class="page hidden">
+      <div class="page-head">
+        <div class="page-title">🌍 Geo-based DNS Routing</div>
+        <div class="page-sub">routing DNS berdasarkan lokasi client</div>
+      </div>
+      <div id="geo-state"></div>
+      <div class="card mb12">
+        <div class="card-title"><span class="ct-icon">⬡</span>Conditional Forwarding</div>
+        <div class="alert info">ℹ Resolver ini meneruskan domain tertentu ke upstream tertentu. Aturan per-negara belum tersedia di backend.</div>
+        <table class="tbl">
+          <thead><tr><th>Domain</th><th>Upstreams</th><th></th></tr></thead>
+          <tbody id="cfwd-body"></tbody>
+        </table>
+        <hr class="divider"/>
+        <div class="card-title" style="margin-bottom:10px">Tambah Aturan</div>
+        <div class="g g2 mb12" style="gap:10px">
+          <div><label class="form-label">Domain suffix</label><input type="text" class="inp" placeholder="internal.example.com" id="cfwd-domain"/></div>
+          <div><label class="form-label">Upstreams (pisahkan koma)</label><input type="text" class="inp" placeholder="10.0.0.1:53, 10.0.0.2:53" id="cfwd-upstreams"/></div>
+        </div>
+        <button class="btn btn-primary" onclick="addConditionalForward()">+ Add Rule</button>
+      </div>
+    </div>
+
+    <!-- ══════════ BLOCKLIST ══════════ -->
+    <div id="page-blocking" class="page hidden">
+      <div class="page-head">
+        <div class="page-title">◈ Blocklist</div>
+        <div class="page-sub">manajemen blocklist · lock-free trie-based blocker</div>
+      </div>
+      <div class="alert info">ℹ Format: AdGuard (||domain^), Pi-hole hosts, domain list (1 per baris). Auto-update via scheduler.</div>
+      <div class="g g3 mb12">
+        <div class="stat-card c-red"><div class="sc-label">Total Domain Blocked</div><div class="sc-value c-red" id="bl-total">—</div><div class="sc-sub">dari semua blocklist</div></div>
+        <div class="stat-card c-blue"><div class="sc-label">Blocklist Aktif</div><div class="sc-value c-blue" id="bl-count">—</div><div class="sc-sub">sumber aktif</div></div>
+        <div class="stat-card c-green"><div class="sc-label">Update Terakhir</div><div class="sc-value c-green" style="font-size:16px" id="bl-last-update">—</div><div class="sc-sub">gravity refresh</div></div>
+      </div>
+      <div class="card mb12">
+        <div class="card-title"><span class="ct-icon">◈</span>Active Blocklists</div>
+        <table class="tbl">
+          <thead><tr><th>Nama</th><th>URL</th><th>Domains</th><th>Update</th><th>Aksi</th></tr></thead>
+          <tbody id="bl-body"></tbody>
+        </table>
+        <div style="margin-top:12px;display:flex;gap:8px">
+          <button class="btn btn-ghost" onclick="updateAllBL()">↺ Update Semua</button>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title"><span class="ct-icon">+</span>Tambah Blocklist</div>
+        <div class="alert info">ℹ Format hosts, AdGuard, dan domain-list terdeteksi otomatis saat sinkronisasi.</div>
+        <div class="form-row" style="gap:8px">
+          <input type="url" class="inp" id="bl-url" placeholder="https://example.com/list.txt"/>
+          <button class="btn btn-primary" onclick="addBlocklist()">+ Add &amp; Update</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══════════ BLOCKED SERVICES ══════════ -->
+    <div id="page-services" class="page hidden">
+      <div class="page-head">
+        <div class="page-title">▣ Blocked Services</div>
+        <div class="page-sub">blokir aplikasi populer berdasarkan domain yang dipakainya</div>
+      </div>
+      <div class="card">
+        <div class="card-title">Katalog Service</div>
+        <div id="services-grid" class="g g4" style="gap:10px"></div>
+      </div>
+    </div>
+
+    <!-- ══════════ SCHEDULE ══════════ -->
+    <div id="page-schedule" class="page hidden">
+      <div class="page-head">
+        <div class="page-title">◕ Schedule</div>
+        <div class="page-sub">blokir service pada rentang hari &amp; jam tertentu</div>
+      </div>
+      <div class="card mb12">
+        <div class="card-title">Aturan Aktif</div>
+        <table class="tbl">
+          <thead><tr><th>Nama</th><th>Services</th><th>Hari</th><th>Mulai</th><th>Selesai</th><th></th></tr></thead>
+          <tbody id="sched-body"></tbody>
+        </table>
+      </div>
+      <div class="card">
+        <div class="card-title">Tambah Aturan</div>
+        <div class="g g3 mb12" style="gap:10px">
+          <div><label class="form-label">Nama</label><input type="text" class="inp" id="sched-name" placeholder="Jam belajar"/></div>
+          <div><label class="form-label">Services (pisahkan koma)</label><input type="text" class="inp" id="sched-services" placeholder="tiktok, youtube"/></div>
+          <div><label class="form-label">Hari</label><input type="text" class="inp" id="sched-days" placeholder="mon,tue,wed,thu,fri"/></div>
+          <div><label class="form-label">Mulai (HH:MM)</label><input type="text" class="inp" id="sched-start" placeholder="08:00"/></div>
+          <div><label class="form-label">Selesai (HH:MM)</label><input type="text" class="inp" id="sched-end" placeholder="17:00"/></div>
+        </div>
+        <button class="btn btn-primary" onclick="addScheduleRule()">+ Add Rule</button>
+      </div>
+    </div>
+
+    <!-- ══════════ WHITELIST ══════════ -->
+    <div id="page-whitelist" class="page hidden">
+      <div class="page-head">
+        <div class="page-title">◎ Whitelist</div>
+        <div class="page-sub">domain yang dikecualikan dari pemblokiran</div>
+      </div>
+      <div class="card mb12">
+        <div class="card-title"><span class="ct-icon">◎</span>Whitelisted Domains</div>
+        <table class="tbl"><thead><tr><th>Domain</th><th></th></tr></thead>
+        <tbody id="wl-body"></tbody></table>
+      </div>
+      <div class="card">
+        <div class="card-title"><span class="ct-icon">+</span>Tambah Whitelist</div>
+        <div class="form-row" style="gap:8px">
+          <input type="text" class="inp" id="wl-domain" placeholder="domain.com"/>
+          <button class="btn btn-primary" onclick="addWhitelist()">+ Add</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══════════ CUSTOM BLOCK ══════════ -->
+    <div id="page-customblock" class="page hidden">
+      <div class="page-head">
+        <div class="page-title">⊗ Custom Block</div>
+        <div class="page-sub">blokir domain manual · NXDOMAIN / Drop / Block Page</div>
+      </div>
+      <div class="alert warn" id="cb-mode-note">⚠ Domain di sini diblokir permanen.</div>
+      <div class="card mb12">
+        <div class="card-title"><span class="ct-icon">⊗</span>Custom Blocked Domains</div>
+        <table class="tbl"><thead><tr><th>Domain</th><th></th></tr></thead>
+        <tbody id="cb-body"></tbody></table>
+      </div>
+      <div class="card">
+        <div class="card-title"><span class="ct-icon">+</span>Tambah Block</div>
+        <div class="form-row" style="gap:8px">
+          <input type="text" class="inp" id="cb-domain" placeholder="domain.com atau *.domain.com"/>
+          <button class="btn btn-primary" onclick="addCustomBlock()">+ Block Domain</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══════════ BLOCKED SERVICES ══════════ -->
+    <div id="page-upstream" class="page hidden">
+      <div class="page-head">
+        <div class="page-title">↑ Upstream DNS</div>
+        <div class="page-sub">konfigurasi upstream · load balancing · failover · ECS</div>
+      </div>
+      <div class="g g2 mb12">
+        <div class="card">
+          <div class="card-title"><span class="ct-icon">↑</span>Primary Upstreams</div>
+          <table class="tbl">
+            <thead><tr><th>Server</th><th>Proto</th><th>Latency</th><th>Status</th><th></th></tr></thead>
+            <tbody id="upstream-body"></tbody>
+          </table>
+          <hr class="divider"/>
+          <div class="form-row" style="gap:8px">
+            <input type="text" class="inp" id="up-inp" placeholder="1.1.1.1 / tls://dns.google / https://..."/>
+            <select class="inp" style="max-width:90px" id="up-proto"><option>UDP</option><option>DoH</option><option>DoT</option><option>DoQ</option></select>
+            <button class="btn btn-primary" onclick="addUpstream()">+</button>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-title"><span class="ct-icon">⊕</span>Test Resolution</div>
+          <label class="form-label">Domain</label>
+          <div class="form-row mb12">
+            <input type="text" class="inp" id="test-domain" placeholder="github.com"/>
+            <button class="btn btn-cyan" onclick="testResolution()">Test</button>
+          </div>
+          <div class="code-block" id="test-result" style="min-height:100px"><span class="c"># Hasil muncul di sini</span></div>
+        </div>
+      </div>
+      <div class="card mb12">
+        <div class="card-title"><span class="ct-icon">⊞</span>Pemilihan Upstream</div>
+        <div class="alert info">ℹ Resolver memilih upstream tercepat berdasarkan RTT (EWMA) dan otomatis menurunkan prioritas upstream yang gagal. Bila upstream tercepat &gt; 60ms, dua upstream teratas diquery paralel dan jawaban tercepat dipakai. EDNS Client Subnet selalu disertakan.</div>
+        <div id="failover-list"></div>
+      </div>
+    </div>
+
+    <!-- ══════════ AUTH ZONES ══════════ -->
+    <div id="page-zones" class="page hidden">
+      <div class="page-head">
+        <div class="page-title">⬡ Authoritative Zones</div>
+        <div class="page-sub">zone records · A/AAAA/CNAME/MX/TXT/SRV/NS/SOA · wildcard support</div>
+      </div>
+      <div class="tabs">
+        <div class="tab-item active" onclick="switchTab(this,'zone-records')">Records</div>
+      </div>
+      <div id="zone-records" class="tab-pane active">
+        <div class="card mb12">
+          <table class="tbl">
+            <thead><tr><th>Name</th><th>Type</th><th>Value</th><th>TTL</th><th>Wildcard</th><th></th></tr></thead>
+            <tbody id="zone-body"></tbody>
+          </table>
+        </div>
+        <div class="card">
+          <div class="card-title">Tambah Record</div>
+          <div class="g g4 mb12" style="gap:10px">
+            <div><label class="form-label">Name</label><input type="text" class="inp" id="zr-name" placeholder="host.local atau *.local"/></div>
+            <div><label class="form-label">Type</label><select class="inp" id="zr-type"><option>A</option><option>AAAA</option><option>CNAME</option><option>MX</option><option>TXT</option><option>SRV</option><option>NS</option><option>PTR</option><option>CAA</option></select></div>
+            <div><label class="form-label">Value</label><input type="text" class="inp" id="zr-value" placeholder="192.168.1.x"/></div>
+            <div><label class="form-label">TTL</label><input type="number" class="inp" id="zr-ttl" value="3600"/></div>
+          </div>
+          <button class="btn btn-primary" onclick="addZoneRecord()">+ Add Record</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══════════ CACHE ══════════ -->
+    <div id="page-cache" class="page hidden">
+      <div class="page-head">
+        <div class="page-title">▦ Cache DNS</div>
+        <div class="page-sub">manajemen cache · prefetch · optimistic caching</div>
+      </div>
+      <div class="g g4 mb12">
+        <div class="stat-card c-green"><div class="sc-label">Cache Entries</div><div class="sc-value c-green" id="cache-size">—</div><div class="sc-sub">aktif</div></div>
+        <div class="stat-card c-cyan"><div class="sc-label">Hit Rate</div><div class="sc-value c-cyan" id="cache-hit">—</div><div class="sc-sub">dari total query</div></div>
+        <div class="stat-card c-purple"><div class="sc-label">Min TTL</div><div class="sc-value c-purple" id="cache-ttl">—</div><div class="sc-sub">detik</div></div>
+        <div class="stat-card c-blue"><div class="sc-label">Max Size</div><div class="sc-value c-blue" id="cache-max">—</div><div class="sc-sub">entries limit</div></div>
+      </div>
+      <div class="g g2">
+        <div class="card">
+          <div class="card-title">Cache Config</div>
+          <div class="field"><label class="form-label" for="cfg-cache-size">Max Size (entries)</label><input type="number" class="inp" id="cfg-cache-size" min="1"/></div>
+          <div class="field"><label class="form-label" for="cfg-cache-min">Min TTL (detik)</label><input type="number" class="inp" id="cfg-cache-min" min="1"/></div>
+          <div class="field"><label class="form-label" for="cfg-cache-max">Max TTL (detik)</label><input type="number" class="inp" id="cfg-cache-max" min="1"/></div>
+          <div class="toggle-row" id="cfg-prefetch" onclick="toggleTR(this)"><div class="tr-left"><div class="tr-icon">⚡</div><div><div class="tr-title">Cache Prefetch</div><div class="tr-desc">Perbarui cache sebelum TTL habis</div></div></div><div class="toggle"></div></div>
+          <div class="alert warn" style="margin-top:10px">⚠ Perubahan ukuran cache berlaku setelah restart.</div>
+          <div style="margin-top:10px;display:flex;gap:8px">
+            <button class="btn btn-primary" onclick="saveCacheConfig()">Simpan</button>
+            <button class="btn btn-danger" onclick="flushCache()">⚡ Flush Cache</button>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-title">Top Cached Domains</div>
+          <div id="cache-top-bars"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══════════ DNSSEC ══════════ -->
+    <div id="page-dnssec" class="page hidden">
+      <div class="page-head">
+        <div class="page-title">⚿ DNSSEC</div>
+        <div class="page-sub">validasi · signing · root hints</div>
+      </div>
+      <div class="g g3 mb12">
+        <div class="stat-card c-green"><div class="sc-label">Signed / Validated</div><div class="sc-value c-green" id="dn-ok">—</div><div class="sc-sub">dari total queries</div></div>
+        <div class="stat-card c-red"><div class="sc-label">Rebinding Blocked</div><div class="sc-value c-red" id="dn-bogus">—</div><div class="sc-sub">response ditolak</div></div>
+        <div class="stat-card c-blue"><div class="sc-label">Insecure</div><div class="sc-value c-blue" id="dn-insecure">—</div><div class="sc-sub">tanpa AD flag</div></div>
+      </div>
+      <div class="g g2">
+        <div class="card">
+          <div class="card-title">Konfigurasi DNSSEC</div>
+          <div class="toggle-row" id="cfg-dnssec" onclick="toggleTR(this)"><div class="tr-left"><div class="tr-icon">⚿</div><div><div class="tr-title">DNSSEC Validation</div><div class="tr-desc">Validasi signature pada response</div></div></div><div class="toggle"></div></div>
+          <div class="toggle-row" id="cfg-rebinding" onclick="toggleTR(this)"><div class="tr-left"><div class="tr-icon">🔒</div><div><div class="tr-title">DNS Rebinding Protection</div><div class="tr-desc">Tolak response yang menunjuk ke IP privat</div></div></div><div class="toggle"></div></div>
+          <div style="margin-top:10px">
+            <button class="btn btn-primary" onclick="saveDnssecConfig()">Simpan</button>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-title">Test Resolusi &amp; DNSSEC</div>
+          <div class="form-row mb12">
+            <input type="text" class="inp" id="dnssec-inp" placeholder="cloudflare.com"/>
+            <button class="btn btn-cyan" onclick="testDNSSEC()">Test</button>
+          </div>
+          <div class="code-block" id="dnssec-result" style="min-height:80px"><span class="c"># Masukkan domain untuk cek DNSSEC</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══════════ CLIENTS ══════════ -->
+    <div id="page-clients" class="page hidden">
+      <div class="page-head">
+        <div class="page-title">◷ Clients</div>
+        <div class="page-sub">per-client settings · group filtering · persistent IDs</div>
+      </div>
+      <div class="card">
+        <div class="card-title">Klien Aktif</div>
+        <table class="tbl">
+          <thead><tr><th>IP</th><th>Hostname</th><th>Group</th><th>Queries</th><th>Blocked</th><th>Last Seen</th></tr></thead>
+          <tbody id="clients-body"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ══════════ ACL ══════════ -->
+    <div id="page-acl" class="page hidden">
+      <div class="page-head">
+        <div class="page-title">🔒 Access Control List</div>
+        <div class="page-sub">allow/deny query berdasarkan IP/CIDR · rate limiting per-IP</div>
+      </div>
+      <div class="g g2 mb12">
+        <div class="card">
+          <div class="card-title"><span style="color:var(--green)">✓</span> Allow List (CIDR)</div>
+          <div class="alert info">ℹ Jika allow list kosong, semua klien diizinkan kecuali yang ada di deny list.</div>
+          <div class="cidr-tags" id="acl-allow-tags"></div>
+          <div class="form-row" style="margin-top:10px">
+            <input type="text" class="inp" id="acl-allow-inp" placeholder="192.168.1.0/24"/>
+            <button class="btn btn-green" onclick="addACL('allow')">+ Add</button>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-title"><span style="color:var(--red)">✕</span> Deny List (CIDR)</div>
+          <div class="cidr-tags" id="acl-deny-tags"></div>
+          <div class="form-row" style="margin-top:10px">
+            <input type="text" class="inp" id="acl-deny-inp" placeholder="10.20.0.0/16"/>
+            <button class="btn btn-danger" onclick="addACL('deny')">+ Deny</button>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">Rate Limiting</div>
+        <div class="field" style="max-width:260px">
+          <label class="form-label" for="cfg-qps">Max QPS per IP (0 = nonaktif)</label>
+          <input type="number" class="inp" id="cfg-qps" min="0"/>
+        </div>
+        <button class="btn btn-primary" style="margin-top:10px" onclick="saveAclConfig()">Simpan ACL &amp; Rate Limit</button>
+      </div>
+    </div>
+
+    <!-- ══════════ PROMETHEUS ══════════ -->
+    <div id="page-metrics" class="page hidden">
+      <div class="page-head">
+        <div class="page-title">📊 Prometheus Metrics</div>
+        <div class="page-sub">endpoint /metrics · scraping untuk Grafana / Prometheus</div>
+      </div>
+      <div id="metrics-state"></div>
+      <div class="g g2 mb12">
+        <div class="card">
+          <div class="card-title">Endpoint Config</div>
+          <div class="field"><label class="form-label" for="cfg-prom-addr">Listen Address</label><input type="text" class="inp" id="cfg-prom-addr" placeholder="0.0.0.0:9153"/></div>
+          <div class="toggle-row" id="cfg-prometheus" onclick="toggleTR(this)"><div class="tr-left"><div class="tr-icon">📊</div><div><div class="tr-title">Prometheus Endpoint Aktif</div><div class="tr-desc">Juga tersedia di /metrics pada port dashboard</div></div></div><div class="toggle"></div></div>
+          <div class="alert warn" style="margin-top:10px">⚠ Endpoint /metrics tidak memakai autentikasi. Batasi aksesnya di level jaringan.</div>
+          <button class="btn btn-primary" style="margin-top:10px" onclick="savePrometheusConfig()">Simpan</button>
+        </div>
+        <div class="card">
+          <div class="card-title">Live Metrics</div>
+          <div class="code-block" id="metrics-preview" style="max-height:280px;overflow-y:auto;font-size:10px"></div>
+          <button class="btn btn-ghost" style="margin-top:10px;font-size:11px" onclick="refreshMetrics()">↺ Refresh</button>
+        </div>
+      </div>
+    </div>
+
+
+
+    <!-- ══════════ SETTINGS ══════════ -->
+    <div id="page-settings" class="page hidden">
+      <div class="page-head">
+        <div class="page-title">⊞ Settings</div>
+        <div class="page-sub">konfigurasi global VortexDNS</div>
+      </div>
+      <form id="settings-form">
+        <div class="card mb12">
+          <div class="card-title">↑ Resolusi</div>
+          <div class="field">
+            <label class="form-label" for="cfg-upstream">Upstream Servers (pisahkan koma)</label>
+            <input type="text" class="inp" id="cfg-upstream" placeholder="1.1.1.1:53, 8.8.8.8:53"/>
+          </div>
+          <div class="field">
+            <label class="form-label" for="cfg-failover">Failover Upstreams (pisahkan koma)</label>
+            <input type="text" class="inp" id="cfg-failover" placeholder="9.9.9.9:53"/>
+          </div>
+          <div class="field">
+            <label class="form-label" for="cfg-blockmode">Blocking Mode</label>
+            <select class="inp" id="cfg-blockmode">
+              <option value="zero_ip">zero_ip (0.0.0.0)</option>
+              <option value="nxdomain">nxdomain</option>
+            </select>
+          </div>
+          <div class="toggle-row" id="cfg-recursive" onclick="toggleTR(this)"><div class="tr-left"><div class="tr-icon">⬡</div><div><div class="tr-title">Recursive Resolver</div><div class="tr-desc">Resolusi iteratif dari root server, tanpa upstream</div></div></div><div class="toggle"></div></div>
+          <div class="toggle-row" id="cfg-aaaa" onclick="toggleTR(this)"><div class="tr-left"><div class="tr-icon">🌐</div><div><div class="tr-title">Filter AAAA</div><div class="tr-desc">Kosongkan jawaban IPv6</div></div></div><div class="toggle"></div></div>
+        </div>
+
+        <div class="g g2 mb12">
+          <div class="card">
+            <div class="card-title">🔒 Filtering</div>
+            <div class="toggle-row" id="cfg-safe" onclick="toggleTR(this)"><div class="tr-left"><div class="tr-icon">☠️</div><div><div class="tr-title">Safe Browsing</div><div class="tr-desc">Blokir domain malware/phishing</div></div></div><div class="toggle"></div></div>
+            <div class="toggle-row" id="cfg-parental" onclick="toggleTR(this)"><div class="tr-left"><div class="tr-icon">🔞</div><div><div class="tr-title">Parental Control</div><div class="tr-desc">Blokir konten dewasa</div></div></div><div class="toggle"></div></div>
+            <div class="toggle-row" id="cfg-geo" onclick="toggleTR(this)"><div class="tr-left"><div class="tr-icon">🌍</div><div><div class="tr-title">Geo DNS</div><div class="tr-desc">Arahkan jawaban berdasarkan lokasi klien</div></div></div><div class="toggle"></div></div>
+            <div class="toggle-row" id="cfg-rdns" onclick="toggleTR(this)"><div class="tr-left"><div class="tr-icon">◷</div><div><div class="tr-title">Reverse DNS</div><div class="tr-desc">Tampilkan hostname klien di dashboard</div></div></div><div class="toggle"></div></div>
+            <div class="toggle-row" id="cfg-longterm" onclick="toggleTR(this)"><div class="tr-left"><div class="tr-icon">☷</div><div><div class="tr-title">Long-term Stats</div><div class="tr-desc">Simpan riwayat query untuk statistik</div></div></div><div class="toggle"></div></div>
+            <div class="field"><label class="form-label" for="cfg-stats-retention">Retensi Statistik (jam)</label><input type="number" class="inp" id="cfg-stats-retention" min="0" max="8760" placeholder="24"/><div class="tr-desc" style="margin-top:4px">Riwayat lebih lama dari ini dihapus otomatis. 0 = simpan semua (dibatasi jumlah).</div></div>
+          </div>
+          <div class="card">
+            <div class="card-title">🌐 Listener</div>
+            <div class="alert warn">⚠ Perubahan listener berlaku setelah restart.</div>
+            <div class="toggle-row" id="cfg-doh" onclick="toggleTR(this)"><div class="tr-left"><div class="tr-icon">🔐</div><div><div class="tr-title">DNS-over-HTTPS</div></div></div><div class="toggle"></div></div>
+            <div class="field"><label class="form-label" for="cfg-doh-addr">DoH Address</label><input type="text" class="inp" id="cfg-doh-addr" placeholder=":443"/></div>
+            <div class="toggle-row" id="cfg-dot" onclick="toggleTR(this)"><div class="tr-left"><div class="tr-icon">🔒</div><div><div class="tr-title">DNS-over-TLS</div></div></div><div class="toggle"></div></div>
+            <div class="field"><label class="form-label" for="cfg-dot-addr">DoT Address</label><input type="text" class="inp" id="cfg-dot-addr" placeholder=":853"/></div>
+            <div class="toggle-row" id="cfg-doq" onclick="toggleTR(this)"><div class="tr-left"><div class="tr-icon">⚡</div><div><div class="tr-title">DNS-over-QUIC</div></div></div><div class="toggle"></div></div>
+            <div class="field"><label class="form-label" for="cfg-doq-addr">DoQ Address</label><input type="text" class="inp" id="cfg-doq-addr" placeholder=":853"/></div>
+          </div>
+        </div>
+
+        <div style="display:flex;gap:8px">
+          <button type="submit" class="btn btn-primary" id="btn-save-cfg">💾 Simpan Settings</button>
+          <button type="button" class="btn btn-danger" onclick="flushCache()">⚡ Flush Cache</button>
+          <button type="button" class="btn btn-danger" onclick="resetStats()">🗑 Reset Statistik</button>
+          <button type="button" class="btn btn-danger" onclick="restartDNS()">↺ Restart VortexDNS</button>
+        </div>
+      </form>
+    </div>
+
+    <!-- ══════════ WEBSITE INTELLIGENCE (OBJECTIVE 14) ══════════ -->
+    <div id="page-webintel" class="page hidden">
+      <div class="page-head">
+        <div class="page-title">🌐 Website Intelligence & URL Scanner</div>
+        <div class="page-sub">real-time surface telemetry · TLS · HTTP/3 · Lighthouse · Tech Stack · AI-Native & SSRF-safe scanning</div>
+      </div>
+
+      <!-- Intelligence Sub-navigation -->
+      <div class="tabs mb16" id="wi-top-tabs">
+        <div class="tab-item active" onclick="switchWiView('scan', this)">⚡ Scanner</div>
+        <div class="tab-item" onclick="switchWiView('history', this)">📋 Scan History (<span id="wi-hist-count">0</span>)</div>
+        <div class="tab-item" onclick="switchWiView('compare', this)">⚖ Compare Scans</div>
+        <div class="tab-item" onclick="switchWiView('engine', this)">⚙ Scanner Status</div>
+      </div>
+
+      <!-- ── VIEW 1: SCANNER & LIVE FINDINGS ────────────────── -->
+      <div id="wi-view-scan" class="wi-view">
+        <!-- URL Input Card -->
+        <div class="card mb16">
+          <div class="card-title">🔍 Target Website Input</div>
+          <div style="font-size:12px;color:var(--text2);margin-bottom:12px;">
+            Safe, non-destructive, rate-limited public surface analysis. Protected by strict SSRF validation isolating private networks and cloud metadata.
+          </div>
+
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+            <input type="url" class="inp" id="wi-input-url" placeholder="https://example.com" style="flex:1;min-width:280px;font-size:14px;padding:10px 14px;" autofocus/>
+            <button type="button" class="btn btn-primary" id="wi-btn-start" onclick="startWebScan()" style="padding:10px 20px;font-size:13px;font-weight:600;">⚡ Start Scan</button>
+            <button type="button" class="btn btn-danger hidden" id="wi-btn-cancel" onclick="cancelWebScan()" style="padding:10px 16px;">✕ Cancel</button>
+            <button type="button" class="btn" onclick="toggleWiAdvanced()" style="padding:10px 14px;">⚙ Options</button>
+          </div>
+
+          <!-- Advanced Options (Collapsible) -->
+          <div id="wi-advanced-opts" class="hidden" style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border);display:grid;grid-template-columns:repeat(auto-fit, minmax(160px, 1fr));gap:12px;">
+            <div>
+              <label class="form-label" for="wi-opt-pages">Max Pages</label>
+              <input type="number" class="inp" id="wi-opt-pages" value="50" min="1" max="200"/>
+            </div>
+            <div>
+              <label class="form-label" for="wi-opt-depth">Max Depth</label>
+              <input type="number" class="inp" id="wi-opt-depth" value="3" min="1" max="5"/>
+            </div>
+            <div>
+              <label class="form-label" for="wi-opt-concurrency">Concurrency</label>
+              <input type="number" class="inp" id="wi-opt-concurrency" value="5" min="1" max="10"/>
+            </div>
+            <div>
+              <label class="form-label" for="wi-opt-timeout">Timeout (s)</label>
+              <input type="number" class="inp" id="wi-opt-timeout" value="15" min="5" max="60"/>
+            </div>
+          </div>
+        </div>
+
+        <!-- Live Scan Progress & Telemetry Box -->
+        <div id="wi-live-box" class="card mb16 hidden">
+          <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:12px;">
+            <div style="display:flex;align-items:center;gap:10px;">
+              <span class="live-dot" id="wi-live-dot"></span>
+              <strong><span id="wi-live-target">https://example.com</span></strong>
+              <span class="pill cyan" id="wi-live-status-pill">RUNNING</span>
+            </div>
+            <div style="font-size:12px;color:var(--text2);">
+              Scan ID: <code id="wi-live-id" style="color:var(--cyan);">—</code> | Elapsed: <span id="wi-live-elapsed" style="color:var(--text);">0s</span>
+            </div>
+          </div>
+
+          <!-- Progress Bar -->
+          <div style="background:var(--bg-base);border-radius:6px;height:10px;overflow:hidden;border:1px solid var(--border);margin-bottom:8px;">
+            <div id="wi-live-bar" style="width:0%;height:100%;background:var(--grad-main);transition:width .3s ease;"></div>
+          </div>
+          <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text2);margin-bottom:16px;">
+            <span>Stage: <strong id="wi-live-stage" style="color:var(--text);">Initializing...</strong></span>
+            <span id="wi-live-pct">0%</span>
+          </div>
+
+          <!-- Realtime Metrics Grid -->
+          <div class="g g6 mb12" style="margin-bottom:12px;">
+            <div class="stat-card" style="padding:10px;">
+              <div class="sc-label" style="font-size:10px;">Pages Inspected</div>
+              <div class="sc-value" style="font-size:18px;" id="wi-m-pages">0 / 0</div>
+            </div>
+            <div class="stat-card" style="padding:10px;">
+              <div class="sc-label" style="font-size:10px;">Requests Total</div>
+              <div class="sc-value" style="font-size:18px;" id="wi-m-reqs">0</div>
+            </div>
+            <div class="stat-card" style="padding:10px;">
+              <div class="sc-label" style="font-size:10px;">Data Transferred</div>
+              <div class="sc-value" style="font-size:18px;" id="wi-m-bytes">0 KB</div>
+            </div>
+            <div class="stat-card" style="padding:10px;">
+              <div class="sc-label" style="font-size:10px;">TLS Score</div>
+              <div class="sc-value" style="font-size:18px;color:var(--green);" id="wi-m-tls">—</div>
+            </div>
+            <div class="stat-card" style="padding:10px;">
+              <div class="sc-label" style="font-size:10px;">AI Native Status</div>
+              <div class="sc-value" style="font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" id="wi-m-ai">—</div>
+            </div>
+            <div class="stat-card" style="padding:10px;">
+              <div class="sc-label" style="font-size:10px;">Findings Count</div>
+              <div class="sc-value" style="font-size:18px;color:var(--yellow);" id="wi-m-findings">0</div>
+            </div>
+          </div>
+
+          <!-- Risk Severity Counters & Export Buttons -->
+          <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;padding-top:12px;border-top:1px solid var(--border);">
+            <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:12px;">
+              <span style="color:var(--text2);margin-right:4px;">Risks:</span>
+              <span class="pill red" id="wi-pill-crit" title="Critical Findings">0 Critical</span>
+              <span class="pill" style="background:rgba(255,152,0,.15);color:var(--orange);" id="wi-pill-high" title="High Findings">0 High</span>
+              <span class="pill" style="background:rgba(155,92,255,.15);color:var(--purple);" id="wi-pill-med" title="Medium Findings">0 Medium</span>
+              <span class="pill" style="background:rgba(0,230,118,.15);color:var(--green);" id="wi-pill-low" title="Low Findings">0 Low</span>
+              <span class="pill gray" id="wi-pill-info" title="Informational">0 Info</span>
+            </div>
+
+            <!-- Export Buttons -->
+            <div style="display:flex;gap:6px;flex-wrap:wrap;" id="wi-export-toolbar">
+              <button type="button" class="btn" onclick="exportScan('json')" style="font-size:11px;padding:4px 10px;">⬇ JSON</button>
+              <button type="button" class="btn" onclick="exportScan('jsonl')" style="font-size:11px;padding:4px 10px;">⬇ JSONL</button>
+              <button type="button" class="btn" onclick="exportScan('csv')" style="font-size:11px;padding:4px 10px;">⬇ CSV</button>
+              <button type="button" class="btn btn-primary" onclick="exportScan('pdf')" style="font-size:11px;padding:4px 10px;">📄 PDF Report</button>
+              <button type="button" class="btn" onclick="viewHtmlReport()" style="font-size:11px;padding:4px 10px;">🌐 HTML Report</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Scan Detail Section (Live Tabs) -->
+        <div id="wi-detail-box" class="card hidden">
+          <!-- 13 Live Tabs per specification -->
+          <div class="tabs mb16" id="wi-detail-tabs" style="overflow-x:auto;white-space:nowrap;padding-bottom:4px;">
+            <div class="tab-item active" onclick="switchWiDetailTab('overview', this)">Overview</div>
+            <div class="tab-item" onclick="switchWiDetailTab('lighthouse', this)">Lighthouse</div>
+            <div class="tab-item" onclick="switchWiDetailTab('tls', this)">TLS</div>
+            <div class="tab-item" onclick="switchWiDetailTab('security', this)">Security</div>
+            <div class="tab-item" onclick="switchWiDetailTab('tech', this)">Tech Stack</div>
+            <div class="tab-item" onclick="switchWiDetailTab('ai', this)">AI Native</div>
+            <div class="tab-item" onclick="switchWiDetailTab('routes', this)">Routes</div>
+            <div class="tab-item" onclick="switchWiDetailTab('network', this)">Network</div>
+            <div class="tab-item" onclick="switchWiDetailTab('perf', this)">Performance</div>
+            <div class="tab-item" onclick="switchWiDetailTab('pwa', this)">PWA</div>
+            <div class="tab-item" onclick="switchWiDetailTab('findings', this)">Findings</div>
+            <div class="tab-item" onclick="switchWiDetailTab('mitigation', this)">Mitigation</div>
+            <div class="tab-item" onclick="switchWiDetailTab('raw', this)">Raw Data</div>
+          </div>
+
+          <!-- Tab 1: Overview -->
+          <div id="wi-pane-overview" class="wi-pane">
+            <div class="g g3 mb16" id="wi-overview-cards"></div>
+            <div class="card mb12" style="background:var(--bg-base);">
+              <div class="card-title">Executive Summary</div>
+              <p id="wi-ov-summary-text" style="color:var(--text2);font-size:13px;line-height:1.6;">Awaiting scan completion...</p>
+            </div>
+          </div>
+
+          <!-- Tab 2: Lighthouse -->
+          <div id="wi-pane-lighthouse" class="wi-pane hidden">
+            <div id="wi-lh-container"></div>
+          </div>
+
+          <!-- Tab 3: TLS -->
+          <div id="wi-pane-tls" class="wi-pane hidden">
+            <div id="wi-tls-container"></div>
+          </div>
+
+          <!-- Tab 4: Security -->
+          <div id="wi-pane-security" class="wi-pane hidden">
+            <div id="wi-security-container"></div>
+          </div>
+
+          <!-- Tab 5: Tech Stack -->
+          <div id="wi-pane-tech" class="wi-pane hidden">
+            <div id="wi-tech-container"></div>
+          </div>
+
+          <!-- Tab 6: AI Native -->
+          <div id="wi-pane-ai" class="wi-pane hidden">
+            <div id="wi-ai-container"></div>
+          </div>
+
+          <!-- Tab 7: Routes -->
+          <div id="wi-pane-routes" class="wi-pane hidden">
+            <div id="wi-routes-container"></div>
+          </div>
+
+          <!-- Tab 8: Network -->
+          <div id="wi-pane-network" class="wi-pane hidden">
+            <div id="wi-network-container"></div>
+          </div>
+
+          <!-- Tab 9: Performance -->
+          <div id="wi-pane-perf" class="wi-pane hidden">
+            <div id="wi-perf-container"></div>
+          </div>
+
+          <!-- Tab 10: PWA -->
+          <div id="wi-pane-pwa" class="wi-pane hidden">
+            <div id="wi-pwa-container"></div>
+          </div>
+
+          <!-- Tab 11: Findings -->
+          <div id="wi-pane-findings" class="wi-pane hidden">
+            <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;">
+              <span style="font-size:12px;color:var(--text2);">Filter Severity:</span>
+              <select class="inp" id="wi-findings-filter" onchange="filterFindingsTable(this.value)" style="width:auto;padding:4px 8px;font-size:12px;">
+                <option value="all">All Severities</option>
+                <option value="critical">Critical</option>
+                <option value="high">High</option>
+                <option value="medium">Medium</option>
+                <option value="low">Low</option>
+                <option value="informational">Informational</option>
+              </select>
+            </div>
+            <div id="wi-findings-container"></div>
+          </div>
+
+          <!-- Tab 12: Mitigation -->
+          <div id="wi-pane-mitigation" class="wi-pane hidden">
+            <div id="wi-mitigation-container"></div>
+          </div>
+
+          <!-- Tab 13: Raw Data -->
+          <div id="wi-pane-raw" class="wi-pane hidden">
+            <pre id="wi-raw-json" style="max-height:500px;overflow:auto;background:var(--bg-base);padding:12px;border-radius:6px;border:1px solid var(--border);font-size:11px;color:var(--cyan);"></pre>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── VIEW 2: SCAN HISTORY ──────────────────────────── -->
+      <div id="wi-view-history" class="wi-view hidden">
+        <div class="card">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px;">
+            <div class="card-title" style="margin:0;">Historical Website Intelligence Scans</div>
+            <button type="button" class="btn btn-sm" onclick="loadScanHistory()">↻ Refresh</button>
+          </div>
+          <div class="table-wrap">
+            <table class="data-table" id="wi-history-table">
+              <thead>
+                <tr>
+                  <th>Target Host</th>
+                  <th>Scan ID</th>
+                  <th>Started At</th>
+                  <th>Duration</th>
+                  <th>TLS</th>
+                  <th>AI Detection</th>
+                  <th>Risks (C / H / M)</th>
+                  <th>Status</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="wi-history-tbody">
+                <tr><td colspan="9" style="text-align:center;color:var(--text3);">Belum ada riwayat scan website.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── VIEW 3: COMPARE SCANS ─────────────────────────── -->
+      <div id="wi-view-compare" class="wi-view hidden">
+        <div class="card mb16">
+          <div class="card-title">⚖ Compare Scans of Target Domain</div>
+          <div style="font-size:12px;color:var(--text2);margin-bottom:12px;">
+            Track regressions, resolved vulnerabilities, technology stack migrations, and AI capability additions over time.
+          </div>
+          <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;">
+            <div style="flex:1;min-width:200px;">
+              <label class="form-label" for="wi-cmp-base">Base Scan (Older)</label>
+              <select class="inp" id="wi-cmp-base"></select>
+            </div>
+            <div style="flex:1;min-width:200px;">
+              <label class="form-label" for="wi-cmp-target">Target Scan (Newer)</label>
+              <select class="inp" id="wi-cmp-target"></select>
+            </div>
+            <div style="padding-top:16px;">
+              <button type="button" class="btn btn-primary" onclick="runScanCompare()">Compare Scans →</button>
+            </div>
+          </div>
+        </div>
+
+        <div id="wi-compare-results" class="hidden">
+          <div class="card mb16" id="wi-cmp-summary-card"></div>
+          <div class="grid-2" style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+            <div class="card" id="wi-cmp-new-findings"></div>
+            <div class="card" id="wi-cmp-res-findings"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── VIEW 4: SCANNER ENGINE STATUS ─────────────────── -->
+      <div id="wi-view-engine" class="wi-view hidden">
+        <div class="card">
+          <div class="card-title">⚙ Scanner & Reporting Engine Health</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:12px;">
+            <div class="stat-card" style="padding:16px;">
+              <div class="sc-label">PDF Reporting Engine</div>
+              <div class="sc-value" id="wi-engine-pdf-status" style="font-size:18px;">Checking...</div>
+              <div class="sc-sub" id="wi-engine-pdf-detail">—</div>
+            </div>
+            <div class="stat-card" style="padding:16px;">
+              <div class="sc-label">Lighthouse Measurements</div>
+              <div class="sc-value" id="wi-engine-lh-status" style="font-size:18px;">Checking...</div>
+              <div class="sc-sub" id="wi-engine-lh-detail">—</div>
+            </div>
+          </div>
+          <div class="card" style="background:var(--bg-base);margin-top:16px;">
+            <strong>Engine Reliability Policy:</strong>
+            <p style="font-size:12px;color:var(--text2);margin-top:4px;">
+              VortexDNS is engineered to never crash or fail startup if an external CLI is missing. When headless Chromium is present, high-fidelity browser PDF generation and Lighthouse audits execute automatically. When absent, the engine falls back to standalone printable HTML reports and explicit 'status: unavailable' tags without fabricating synthetic benchmarks.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<!-- Confirm modal (centered, in-page) -->
+<div id="modal-backdrop" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+  <div class="modal-box">
+    <div class="modal-icon" id="modal-icon">⎋</div>
+    <div class="modal-title" id="modal-title">Konfirmasi</div>
+    <div class="modal-msg" id="modal-msg">Anda yakin?</div>
+    <div class="modal-actions">
+      <button type="button" class="btn" id="modal-cancel">Batal</button>
+      <button type="button" class="btn btn-primary" id="modal-ok">Ya, Lanjutkan</button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div id="toast"><div class="toast-inner" id="toast-inner"></div></div>
+
+<!-- Connection status bar -->
+<div id="conn-bar">
+  <span id="conn-bar-msg"></span>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,35 @@
+services:
+  vortexdns:
+    build: .
+    container_name: vortexdns_test
+    ports:
+      - "10053:53/udp"
+      - "10053:53/tcp"
+      - "18080:8080/tcp"
+    # Config and data live on the host so credentials survive container
+    # recreation, and so a password reset can be run from either side.
+    volumes:
+      - ./config.json:/app/config.json
+      - vortex_data:/app/vortex_db
+      - vortex_logs:/app/logs
+    restart: unless-stopped
+
+# Forgot the dashboard password? Reset without rebuilding:
+#
+#   docker compose exec vortexdns ./vortexdns -reset-password
+#
+# Non-interactive (CI, scripted):
+#
+#   docker compose exec -e VORTEX_ADMIN_PASSWORD=newsecret vortexdns \
+#     ./vortexdns -reset-password
+#
+# Container won't start at all? Run a throwaway one against the same config:
+#
+#   docker compose run --rm -e VORTEX_ADMIN_PASSWORD=newsecret \
+#     vortexdns ./vortexdns -reset-password
+#
+# Then: docker compose restart vortexdns
+
+volumes:
+  vortex_data:
+  vortex_logs:

@@ -1,0 +1,21 @@
+# Compiled binary
+vortexdns
+vortexdns.exe
+vortexdns_test
+*.exe
+
+# Live config (berisi kredensial admin + session secret). Pakai config.example.json sbg template.
+config.json
+config.json.bak
+
+# Runtime data — struktur folder di-keep, isinya tidak
+vortex_db/access.log*
+vortex_db/lists/*
+!vortex_db/lists/.gitkeep
+!vortex_db/lists/82bbcf0fb464ac35c8f796c63097bbbb.txt
+vortex_db/scans/*
+!vortex_db/scans/.gitkeep
+vortex_db/reports/*
+!vortex_db/reports/.gitkeep
+*.log
+

@@ -1,0 +1,426 @@
+openapi: 3.0.3
+info:
+  title: VortexDNS Dashboard API
+  description: >
+    REST API untuk dashboard VortexDNS. Sebagian besar endpoint memerlukan
+    sesi terautentikasi (cookie `vortex_session`) yang didapat dari
+    `/api/auth/login`. Endpoint di bawah `/api/auth/*` dan `/metrics` bersifat
+    publik.
+  version: 1.0.0
+servers:
+  - url: /
+security:
+  - cookieAuth: []
+paths:
+  /api/auth/status:
+    get:
+      summary: Status autentikasi & apakah butuh setup awal
+      security: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  needs_setup: { type: boolean }
+                  is_logged_in: { type: boolean }
+  /api/auth/setup:
+    post:
+      summary: Buat akun admin pertama (hanya bila belum ada admin)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password]
+              properties:
+                username: { type: string, minLength: 3 }
+                password: { type: string, minLength: 6 }
+      responses:
+        '200': { description: Berhasil }
+        '400': { description: Payload tidak valid }
+        '403': { description: Admin sudah dikonfigurasi }
+  /api/auth/login:
+    post:
+      summary: Login, mengeset cookie sesi
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password]
+              properties:
+                username: { type: string }
+                password: { type: string }
+      responses:
+        '200': { description: Berhasil, set-cookie vortex_session }
+        '401': { description: Kredensial salah }
+  /api/auth/logout:
+    post:
+      summary: Logout, menghapus sesi
+      responses:
+        '200': { description: Berhasil }
+  /api/stats:
+    get:
+      summary: Statistik ringkas termasuk breakdown rcode
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Stats'
+  /api/stats/reset:
+    post:
+      summary: Reset semua penghitung statistik & riwayat long-term
+      responses:
+        '200': { description: Berhasil }
+        '405': { description: Method tidak diizinkan }
+  /api/stats/detailed:
+    get:
+      summary: Statistik detail
+      responses:
+        '200': { description: OK }
+  /api/logs:
+    get:
+      summary: Query log dari ring buffer
+      responses:
+        '200': { description: OK }
+  /api/logs/stream:
+    get:
+      summary: Stream query realtime (Server-Sent Events)
+      responses:
+        '200':
+          description: Stream text/event-stream
+          content:
+            text/event-stream: {}
+  /api/rules:
+    get: { summary: Daftar rule blokir, responses: { '200': { description: OK } } }
+  /api/rules/add:
+    post: { summary: Tambah rule, responses: { '200': { description: OK } } }
+  /api/rules/remove:
+    post: { summary: Hapus rule, responses: { '200': { description: OK } } }
+  /api/cache/flush:
+    post: { summary: Kosongkan cache DNS, responses: { '200': { description: OK } } }
+  /api/service/restart:
+    post: { summary: Restart layanan VortexDNS, responses: { '200': { description: OK } } }
+  /api/clients:
+    get: { summary: Daftar klien aktif, responses: { '200': { description: OK } } }
+  /api/upstream:
+    get: { summary: Status upstream resolver, responses: { '200': { description: OK } } }
+  /api/blocklists:
+    get: { summary: Daftar blocklist, responses: { '200': { description: OK } } }
+  /api/topdomains:
+    get: { summary: Domain teratas, responses: { '200': { description: OK } } }
+  /api/zones/records:
+    get: { summary: Zone records, responses: { '200': { description: OK } } }
+  /api/dns/test:
+    get:
+      summary: Uji resolusi domain
+      parameters:
+        - name: domain
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: OK }
+  /api/advanced/config:
+    get: { summary: Ambil konfigurasi lengkap, responses: { '200': { description: OK } } }
+    post: { summary: Simpan konfigurasi, responses: { '200': { description: OK } } }
+  /metrics:
+    get:
+      summary: Metrik Prometheus (publik)
+      security: []
+      responses:
+        '200':
+          description: OK
+          content:
+            text/plain: {}
+  /api/v1/scans:
+    post:
+      summary: Start a new website intelligence scan
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [url]
+              properties:
+                url: { type: string, example: "https://example.com" }
+                max_pages: { type: integer, default: 50 }
+                max_depth: { type: integer, default: 3 }
+                max_concurrency: { type: integer, default: 5 }
+                request_timeout: { type: integer, default: 15 }
+                enable_lighthouse: { type: boolean, default: true }
+      responses:
+        '201':
+          description: Scan created and queued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Scan'
+        '400': { description: Invalid URL or SSRF rejection }
+    get:
+      summary: List recent scans
+      responses:
+        '200':
+          description: List of scans
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Scan'
+  /api/v1/scans/{id}:
+    get:
+      summary: Get details of a specific scan
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Scan details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Scan'
+        '404': { description: Scan not found }
+    delete:
+      summary: Cancel a running scan or delete its records
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: Scan cancelled or deleted }
+        '404': { description: Scan not found }
+  /api/v1/scans/{id}/events:
+    get:
+      summary: Stream real-time scan progress events (SSE)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Server-Sent Events stream
+          content:
+            text/event-stream: {}
+  /api/v1/scans/{id}/report:
+    get:
+      summary: Retrieve the compiled Scan Report
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Full Scan Report
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScanReport'
+  /api/v1/scans/{id}/export/json:
+    get:
+      summary: Export scan report as JSON
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: JSON report file
+          content:
+            application/json: {}
+  /api/v1/scans/{id}/export/jsonl:
+    get:
+      summary: Stream scan report records as JSONL
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Streaming JSONL records
+          content:
+            application/x-ndjson: {}
+  /api/v1/scans/{id}/export/csv:
+    get:
+      summary: Export scan findings and mitigations as CSV
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: CSV spreadsheet
+          content:
+            text/csv: {}
+  /api/v1/scans/{id}/export/pdf:
+    get:
+      summary: Download professional printable PDF report
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Printable PDF document
+          content:
+            application/pdf: {}
+  /api/v1/scans/compare:
+    get:
+      summary: Compare two scans for finding resolution and regression
+      parameters:
+        - name: base
+          in: query
+          required: true
+          schema: { type: string }
+        - name: target
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Comparison diff
+  /api/v1/scans/engine-status:
+    get:
+      summary: Check health status of PDF and Lighthouse engines
+      responses:
+        '200':
+          description: Engine status
+components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: vortex_session
+  schemas:
+    Stats:
+      type: object
+      properties:
+        total_queries: { type: integer }
+        blocked_queries: { type: integer }
+        cached_queries: { type: integer }
+        noerror_queries: { type: integer }
+        nxdomain_queries: { type: integer }
+        refused_queries: { type: integer }
+        servfail_queries: { type: integer }
+        block_percentage: { type: number }
+        avg_latency: { type: integer }
+        p95_latency: { type: integer }
+        active_clients: { type: integer }
+        dnssec_rate: { type: string }
+    Scan:
+      type: object
+      properties:
+        id: { type: string }
+        target_url: { type: string }
+        target_host: { type: string }
+        status: { type: string, enum: [queued, running, completed, failed, cancelled] }
+        stage: { type: string }
+        progress: { type: integer }
+        created_at: { type: string, format: date-time }
+        started_at: { type: string, format: date-time }
+        ended_at: { type: string, format: date-time }
+        duration_ms: { type: integer }
+        error: { type: string }
+        metrics:
+          type: object
+          properties:
+            pages_discovered: { type: integer }
+            pages_scanned: { type: integer }
+            requests_total: { type: integer }
+            bytes_received: { type: integer }
+            findings_count: { type: integer }
+    ScanReport:
+      type: object
+      properties:
+        scan_id: { type: string }
+        target: { type: object }
+        generated_at: { type: string, format: date-time }
+        summary: { type: object }
+        lighthouse: { $ref: '#/components/schemas/LighthouseResult' }
+        tls: { $ref: '#/components/schemas/TLSResult' }
+        technologies:
+          type: array
+          items:
+            $ref: '#/components/schemas/TechnologyFinding'
+        ai:
+          type: object
+          properties:
+            classification: { type: string }
+            confidence: { type: number }
+            findings:
+              type: array
+              items:
+                $ref: '#/components/schemas/AIFinding'
+        security:
+          type: array
+          items:
+            $ref: '#/components/schemas/SecurityFinding'
+    LighthouseResult:
+      type: object
+      properties:
+        status: { type: string }
+        performance: { type: number }
+        accessibility: { type: number }
+        best_practices: { type: number }
+        seo: { type: number }
+        pwa: { type: number }
+    TLSResult:
+      type: object
+      properties:
+        enabled: { type: boolean }
+        score: { type: integer }
+        grade: { type: string }
+        protocol: { type: string }
+        cipher_suite: { type: string }
+    TechnologyFinding:
+      type: object
+      properties:
+        technology: { type: string }
+        category: { type: string }
+        confidence: { type: number }
+        evidence: { type: array, items: { type: string } }
+    AIFinding:
+      type: object
+      properties:
+        provider: { type: string }
+        technology: { type: string }
+        capability: { type: string }
+        confidence: { type: number }
+        evidence: { type: array, items: { type: string } }
+    SecurityFinding:
+      type: object
+      properties:
+        id: { type: string }
+        category: { type: string }
+        severity: { type: string, enum: [critical, high, medium, low, info] }
+        title: { type: string }
+        impact: { type: string }
+        affected_asset: { type: string }
+    Mitigation:
+      type: object
+      properties:
+        finding_id: { type: string }
+        title: { type: string }
+        action: { type: string }
+        verification: { type: string }
+        priority: { type: string }
