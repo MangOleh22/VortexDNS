@@ -139,7 +139,7 @@ func (u *BlockerUpdater) StartUpdate() {
 				
 				var reader io.Reader
 
-				isLocal := strings.HasPrefix(url, "file://") || strings.HasPrefix(url, "/")
+				isLocal := isLocalPath(url)
 				if isLocal {
 					localPath := strings.TrimPrefix(url, "file://")
 					log.Printf("[Updater] Reading local blocklist: %s", localPath)
@@ -230,7 +230,7 @@ func (u *BlockerUpdater) StartUpdate() {
 				
 				var reader io.Reader
 				
-				isLocal := strings.HasPrefix(url, "file://") || strings.HasPrefix(url, "/")
+				isLocal := isLocalPath(url)
 				if isLocal {
 					localPath := strings.TrimPrefix(url, "file://")
 					log.Printf("[Updater] Reading local whitelist: %s", localPath)
@@ -293,6 +293,17 @@ func (u *BlockerUpdater) StartUpdate() {
 
 		log.Printf("[Updater] Blocklist update finished. Total loaded rules: %d", u.TotalRules)
 	}()
+}
+
+// isLocalPath reports whether a blocklist/whitelist source is a local file
+// rather than a remote URL. Anything that is not an http(s) URL is treated as a
+// local path: explicit file:// scheme, absolute paths, or repo-relative paths
+// like "vortex_db/lists/foo.txt". This keeps bundled offline lists working.
+func isLocalPath(src string) bool {
+	if strings.HasPrefix(src, "http://") || strings.HasPrefix(src, "https://") {
+		return false
+	}
+	return true
 }
 
 // parseHostsReader reads hosts file data from reader and extracts domains

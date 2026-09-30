@@ -11,6 +11,19 @@ Semua perubahan yang tercatat di branch `development`.
 
 ---
 
+## 2026-09-30
+
+### Perbaikan Bug (dari testing)
+- **Blocklist lokal tak ter-load** — Path relatif seperti `vortex_db/lists/…` dikira URL
+  remote (gagal download). Ditambah `isLocalPath()`: apa pun yang bukan `http(s)://`
+  diperlakukan sebagai file lokal. Test `updater_test.go` ditambahkan.
+- **Blocklist bundled ke-hide volume** — File di image tertutup oleh mount `vortex_data`.
+  Ditambah `scripts/entrypoint.sh` yang men-seed blocklist bundled dari `/app/seed/lists`
+  ke volume saat pertama jalan (tak menimpa yang sudah ada). Dockerfile pakai ENTRYPOINT.
+  Hasil: 2130 rules ter-load, domain blocklist (mis. `tracking.miui.com`) → NXDOMAIN.
+
+---
+
 ## 2026-09-29
 
 ### Fitur Baru — Storage SQLite (Fase 1-5, LENGKAP)
