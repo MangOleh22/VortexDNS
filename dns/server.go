@@ -181,6 +181,23 @@ func (s *DNSServer) Shutdown() {
 
 // ServeDNS is the core request processing pipeline (Panic Recovery + Adblock + Cache + Forwarder)
 func (s *DNSServer) ServeDNS(w dns.ResponseWriter, req *dns.Msg) {
+	// 1. Crash/Panic Recovery Middleware (harus pertama agar menangkap semua panic)
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("[Recovery] Critical Panic recovered: %v\nStack trace:\n%s", r, debug.Stack())
+			if req != nil {
+				m := new(dns.Msg)
+				m.SetRcode(req, dns.RcodeServerFailure)
+				s.recordRcode(dns.RcodeServerFailure)
+				_ = w.WriteMsg(m)
+			}
+		}
+	}()
+
+	if req == nil {
+		return
+	}
+
 	startTime := time.Now()
 	clientIP, _, _ := net.SplitHostPort(w.RemoteAddr().String())
 
@@ -193,6 +210,15 @@ func (s *DNSServer) ServeDNS(w dns.ResponseWriter, req *dns.Msg) {
 		return
 	}
 
+	// Validasi Question kosong sebelum diproses lebih lanjut
+	if len(req.Question) == 0 {
+		m := new(dns.Msg)
+		m.SetRcode(req, dns.RcodeFormatError)
+		s.recordRcode(dns.RcodeFormatError)
+		_ = w.WriteMsg(m)
+		return
+	}
+
 	// Access Control List (ACL) check
 	if !s.advanced.IsAllowedByACL(clientIP) {
 		m := new(dns.Msg)
@@ -200,24 +226,6 @@ func (s *DNSServer) ServeDNS(w dns.ResponseWriter, req *dns.Msg) {
 		s.recordRcode(dns.RcodeRefused)
 		_ = w.WriteMsg(m)
 		s.logQuery(req.Question[0].Name, "ANY", clientIP, "Blocked-ACL", 0)
-		return
-	}
-
-	// 1. Crash/Panic Recovery Middleware
-	defer func() {
-		if r := recover(); r != nil {
-			log.Printf("[Recovery] Critical Panic recovered: %v\nStack trace:\n%s", r, debug.Stack())
-			m := new(dns.Msg)
-			m.SetRcode(req, dns.RcodeServerFailure)
-			s.recordRcode(dns.RcodeServerFailure)
-			_ = w.WriteMsg(m)
-		}
-	}()
-
-	if len(req.Question) == 0 {
-		m := new(dns.Msg)
-		m.SetRcode(req, dns.RcodeFormatError)
-		_ = w.WriteMsg(m)
 		return
 	}
 

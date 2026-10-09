@@ -49,6 +49,11 @@ type DashboardServer struct {
 	sessionTokens map[string]time.Time
 	sessionMu     sync.Mutex
 
+	// Login Rate Limiter & Brute-force protection: IP -> attempts & lockout
+	loginAttempts   map[string][]time.Time
+	loginLockout    map[string]time.Time
+	loginAttemptsMu sync.Mutex
+
 	// Server start time, used for real uptime reporting
 	startTime time.Time
 
@@ -59,6 +64,9 @@ type DashboardServer struct {
 	auditLog []AuditEntry
 	auditMu  sync.Mutex
 }
+
+// dummyBcryptHash is used to prevent username enumeration timing attacks
+const dummyBcryptHash = "$2a$10$vI8aWBnW3fID.ZQ4/zo1G.q1sE8e6s5lXG3C3oR3U4bX2mB5u8aqa"
 
 // AuditEntry records an administrative action on the dashboard
 type AuditEntry struct {
@@ -114,6 +122,8 @@ func New(cfg *config.Config, s *dns.DNSServer, b *blocker.Blocker, u *blocker.Bl
 		forwarder:     f,
 		mux:           http.NewServeMux(),
 		sessionTokens: make(map[string]time.Time),
+		loginAttempts: make(map[string][]time.Time),
+		loginLockout:  make(map[string]time.Time),
 		startTime:     time.Now(),
 		store:         store,
 	}
@@ -447,11 +457,53 @@ func (ds *DashboardServer) handleAuthSetup(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, map[string]string{"status": "success"})
 }
 
+func (ds *DashboardServer) recordFailedLogin(ip string) {
+	ds.loginAttemptsMu.Lock()
+	defer ds.loginAttemptsMu.Unlock()
+
+	now := time.Now()
+	cutoff := now.Add(-5 * time.Minute)
+	valid := make([]time.Time, 0, len(ds.loginAttempts[ip])+1)
+	for _, t := range ds.loginAttempts[ip] {
+		if t.After(cutoff) {
+			valid = append(valid, t)
+		}
+	}
+	valid = append(valid, now)
+	ds.loginAttempts[ip] = valid
+
+	if len(valid) >= 5 {
+		ds.loginLockout[ip] = now.Add(5 * time.Minute)
+		log.Printf("[Security] Login lockout aktif untuk IP %s (5x gagal percobaan)", ip)
+	}
+}
+
+func (ds *DashboardServer) recordSuccessfulLogin(ip string) {
+	ds.loginAttemptsMu.Lock()
+	defer ds.loginAttemptsMu.Unlock()
+	delete(ds.loginAttempts, ip)
+	delete(ds.loginLockout, ip)
+}
+
 func (ds *DashboardServer) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
 		return
 	}
+
+	clientIP := clientIPOf(r)
+
+	// Periksa Lockout Rate Limiting
+	ds.loginAttemptsMu.Lock()
+	if lockUntil, ok := ds.loginLockout[clientIP]; ok && time.Now().Before(lockUntil) {
+		remaining := time.Until(lockUntil).Round(time.Second)
+		ds.loginAttemptsMu.Unlock()
+		writeJSON(w, http.StatusTooManyRequests, map[string]string{
+			"error": fmt.Sprintf("Terlalu banyak percobaan gagal. Coba lagi dalam %s", remaining),
+		})
+		return
+	}
+	ds.loginAttemptsMu.Unlock()
 
 	if ds.cfg.AdminPasswordHash == "" {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "setup required"})
@@ -478,17 +530,22 @@ func (ds *DashboardServer) handleAuthLogin(w http.ResponseWriter, r *http.Reques
 		wantUser, wantHash = ds.cfg.AdminUsername, ds.cfg.AdminPasswordHash
 	}
 
-	if req.Username != wantUser {
+	// Mitigasi Timing Attack: Selalu jalankan bcrypt baik username cocok atau tidak
+	userValid := (req.Username != "" && req.Username == wantUser)
+	hashToCompare := dummyBcryptHash
+	if userValid && wantHash != "" {
+		hashToCompare = wantHash
+	}
+
+	bcryptErr := bcrypt.CompareHashAndPassword([]byte(hashToCompare), []byte(req.Password))
+	if !userValid || bcryptErr != nil {
+		ds.recordFailedLogin(clientIP)
 		ds.recordAudit(r, "login", "Login gagal — username: "+req.Username, false)
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid credentials"})
 		return
 	}
 
-	if err := bcrypt.CompareHashAndPassword([]byte(wantHash), []byte(req.Password)); err != nil {
-		ds.recordAudit(r, "login", "Login gagal — username: "+req.Username, false)
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid credentials"})
-		return
-	}
+	ds.recordSuccessfulLogin(clientIP)
 
 	// Generate session token
 	b := make([]byte, 32)
@@ -860,7 +917,11 @@ func (ds *DashboardServer) handleServerRestart(w http.ResponseWriter, r *http.Re
 // Advanced handlers for premium configurations and tools
 func (ds *DashboardServer) handleAdvancedConfig(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
-		writeJSON(w, http.StatusOK, ds.cfg)
+		// Sanitasi kredensial sensitif agar tidak bocor via API
+		safeCfg := *ds.cfg
+		safeCfg.AdminPasswordHash = ""
+		safeCfg.SessionSecret = ""
+		writeJSON(w, http.StatusOK, &safeCfg)
 		return
 	} else if r.Method == http.MethodPost {
 		var req config.Config

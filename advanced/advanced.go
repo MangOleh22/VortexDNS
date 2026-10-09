@@ -1124,14 +1124,21 @@ func (ae *AdvancedEngine) LookupAuthoritative(domain string, qType uint16) []dns
 	return answers
 }
 
-// 24. DNS Rebinding Protection
+// 24. DNS Rebinding Protection (IPv4 A & IPv6 AAAA)
 func (ae *AdvancedEngine) IsRebindingResponse(msg *dns.Msg) bool {
-	if !ae.cfg.DnsRebindingEnabled {
+	if !ae.cfg.DnsRebindingEnabled || msg == nil {
 		return false
 	}
 	for _, rr := range msg.Answer {
 		if aRecord, ok := rr.(*dns.A); ok {
 			ip := aRecord.A
+			if ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast() {
+				atomic.AddInt64(&ae.RebindingBlocked, 1)
+				return true
+			}
+		}
+		if aaaaRecord, ok := rr.(*dns.AAAA); ok {
+			ip := aaaaRecord.AAAA
 			if ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast() {
 				atomic.AddInt64(&ae.RebindingBlocked, 1)
 				return true

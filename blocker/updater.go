@@ -141,7 +141,14 @@ func (u *BlockerUpdater) StartUpdate() {
 
 				isLocal := isLocalPath(url)
 				if isLocal {
-					localPath := strings.TrimPrefix(url, "file://")
+					localPath, err := u.safeLocalPath(url)
+					if err != nil {
+						log.Printf("[Updater] Keamanan: path blocklist ditolak %q: %v", url, err)
+						u.mu.Lock()
+						u.UpdateError = fmt.Sprintf("Path tidak diizinkan: %v", err)
+						u.mu.Unlock()
+						return
+					}
 					log.Printf("[Updater] Reading local blocklist: %s", localPath)
 					file, err := os.Open(localPath)
 					if err != nil {
@@ -232,7 +239,11 @@ func (u *BlockerUpdater) StartUpdate() {
 				
 				isLocal := isLocalPath(url)
 				if isLocal {
-					localPath := strings.TrimPrefix(url, "file://")
+					localPath, err := u.safeLocalPath(url)
+					if err != nil {
+						log.Printf("[Updater] Keamanan: path whitelist ditolak %q: %v", url, err)
+						return
+					}
 					log.Printf("[Updater] Reading local whitelist: %s", localPath)
 					file, err := os.Open(localPath)
 					if err != nil {
@@ -293,6 +304,29 @@ func (u *BlockerUpdater) StartUpdate() {
 
 		log.Printf("[Updater] Blocklist update finished. Total loaded rules: %d", u.TotalRules)
 	}()
+}
+
+// safeLocalPath memvalidasi bahwa berkas lokal harus berada di dalam DatabaseDir,
+// mencegah eksploitasi Local File Inclusion (LFI) dan pembacaan berkas sistem sembarang.
+func (u *BlockerUpdater) safeLocalPath(src string) (string, error) {
+	cleanSrc := strings.TrimPrefix(src, "file://")
+	cleaned := filepath.Clean(cleanSrc)
+	if !filepath.IsAbs(cleaned) {
+		cleaned = filepath.Clean(filepath.Join(u.cfg.DatabaseDir, cleaned))
+	}
+	dbDirAbs, err := filepath.Abs(u.cfg.DatabaseDir)
+	if err != nil {
+		return "", fmt.Errorf("invalid database dir")
+	}
+	targetAbs, err := filepath.Abs(cleaned)
+	if err != nil {
+		return "", fmt.Errorf("invalid file path")
+	}
+	rel, err := filepath.Rel(dbDirAbs, targetAbs)
+	if err != nil || strings.HasPrefix(rel, "..") {
+		return "", fmt.Errorf("akses ditolak: path harus berada di dalam direktori %s", u.cfg.DatabaseDir)
+	}
+	return targetAbs, nil
 }
 
 // isLocalPath reports whether a blocklist/whitelist source is a local file

@@ -187,10 +187,10 @@ docker compose up -d vortexdns
 
 ### c. Docker (tanpa Compose)
 ```bash
-docker exec -it vortexdns_test vortex-reset
+docker exec -it vortexdns vortex-reset
 # atau non-interaktif:
-docker exec -e VORTEX_ADMIN_PASSWORD='PasswordBaru123' vortexdns_test vortex-reset --password
-docker restart vortexdns_test
+docker exec -e VORTEX_ADMIN_PASSWORD='PasswordBaru123' vortexdns vortex-reset --password
+docker restart vortexdns
 ```
 
 ### d. Kubernetes
